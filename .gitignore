@@ -1,0 +1,18 @@
+# Python bytecode and caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated log folder contents (except .gitkeep)
+logs/*
+!logs/.gitkeep
+
+# Temporary capture files
+client/latest.png
+temp_test_screenshot.png
+
+# System files
+.DS_Store
+
+# Exclude local agent/worker planning files from Git commits
+.agent/
