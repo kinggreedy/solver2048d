@@ -818,6 +818,8 @@ class Solver2048dGUI(QMainWindow):
 
     def request_android_capture(self):
         """Signals the background Flask server that a capture is requested."""
+        if hasattr(self, 'chk_auto_apply'):
+            self.chk_auto_apply.setChecked(False)
         import src.capture_server as capture_server
         capture_server.set_capture_requested(True)
         self.lbl_capture_status.setText("⏳ Waiting for Android...")

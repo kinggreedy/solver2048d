@@ -474,10 +474,6 @@ def parse_screenshot(image_path):
     template_root = _template_dir(cfg)
     template_threshold = float(cfg.get('template_match_threshold', X_TEMPLATE_MATCH_THRESHOLD))
     templates_by_level = _load_x_templates(cfg) if template_matching_enabled else {}
-    timestamp = None
-    if template_matching_enabled:
-        import datetime
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     crop_x = cfg.get('crop_x', 100)
     crop_y = cfg.get('crop_y', 500)
     crop_w = cfg.get('crop_w', 880)
@@ -666,11 +662,6 @@ def parse_screenshot(image_path):
 
             grid[r][c] = closest_lvl
             
-            template_info = ""
-            if template_matching_enabled and mode == 'x' and timestamp and closest_lvl > 0:
-                if _save_x_template_sample(cell_crop, closest_lvl, template_root, timestamp, r, c):
-                    template_info = " | template saved"
-                    
             if method == "Template":
                 metric_label = "sim"
                 metric_value = f"{min_dist:.3f}"
@@ -682,7 +673,7 @@ def parse_screenshot(image_path):
                 metric_value = str(int(min_dist))
             row_debug.append(
                 f"({r},{c}): cRGB={sampled_rgb} {lum_info} "
-                f"-> Lvl {closest_lvl} [{method}] ({metric_label}={metric_value}){template_info}"
+                f"-> Lvl {closest_lvl} [{method}] ({metric_label}={metric_value})"
             )
             
         print(" | ".join(row_debug))
