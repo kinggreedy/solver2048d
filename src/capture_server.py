@@ -5,35 +5,68 @@ import threading
 
 app = Flask(__name__)
 
-# State variables
+# State lock for thread safety
+state_lock = threading.Lock()
+
+# Thread-safe State variables
 capture_requested = False
+action_requested = None
+action_coordinates = None
+action_seq = 0
 latest_screenshot_path = None
 latest_parsed_board = None
 
-# Callback trigger to notify GUI thread
+# Callback triggers to notify GUI thread
 on_capture_received_callback = None
 on_status_changed_callback = None
+
+def set_capture_requested(val):
+    """Thread-safe setter for capture_requested."""
+    global capture_requested
+    with state_lock:
+        capture_requested = val
+
+def set_action_requested(action, coordinates):
+    """Thread-safe setter for action_requested and coordinates, increments sequence version."""
+    global action_requested, action_coordinates, action_seq
+    with state_lock:
+        action_requested = action
+        action_coordinates = coordinates
+        action_seq += 1
 
 @app.route('/capture/request', methods=['POST'])
 def capture_request():
     """Sets capture_requested to True to signal the Windows agent to capture."""
-    global capture_requested
-    capture_requested = True
+    set_capture_requested(True)
     return jsonify({"status": "success", "capture_requested": True})
 
 @app.route('/capture/poll', methods=['GET'])
 def capture_poll():
-    """Polled by the Windows agent. Returns true if capture is requested, then resets flag."""
-    global capture_requested
-    state = capture_requested
-    if state:
-        capture_requested = False # Reset flag so agent only screenshots once
-    return jsonify({"capture_requested": state})
+    """Polled by the Windows agent. Returns current capture and swipe action requests with versioning."""
+    global capture_requested, action_requested, action_coordinates, action_seq
+    
+    with state_lock:
+        cap_req = capture_requested
+        if cap_req:
+            capture_requested = False # Reset so agent only captures once
+        
+        return jsonify({
+            "capture_requested": cap_req,
+            "action_requested": action_requested,
+            "swipe_coords": action_coordinates,
+            "action_seq": action_seq
+        })
 
 @app.route('/capture/upload', methods=['POST'])
 def capture_upload():
     """Handles screenshot uploads, saves the file, parses the board, and notifies the GUI thread."""
     global latest_screenshot_path, latest_parsed_board
+    
+    # Extract query params for debugging/tracking
+    source = request.args.get('source', 'unknown')
+    action = request.args.get('action', 'none')
+    action_seq = request.args.get('action_seq', 'none')
+    print(f"Received upload: source={source}, action={action}, action_seq={action_seq}")
     
     if 'file' not in request.files:
         return jsonify({"status": "error", "message": "No file uploaded"}), 400
@@ -49,21 +82,22 @@ def capture_upload():
     try:
         # Save screenshot
         file.save(save_path)
-        latest_screenshot_path = save_path
         
         # Notify GUI that we have received the image and are starting parsing
         if on_status_changed_callback:
             on_status_changed_callback("Parsing...")
         
-        # Parse board image
+        # Parse board image (not blocking lock)
         import src.image_parser as image_parser
         grid = image_parser.parse_screenshot(save_path)
+        board_int = None
         if grid:
             from src import game_engine
-            latest_parsed_board = game_engine.list_to_board(grid)
-        else:
-            grid = None
-            latest_parsed_board = None
+            board_int = game_engine.list_to_board(grid)
+            
+        with state_lock:
+            latest_screenshot_path = save_path
+            latest_parsed_board = board_int
             
         # Trigger PyQt GUI callback to update display thread-safely
         if on_capture_received_callback:
@@ -82,17 +116,21 @@ def capture_latest():
     """Retrieves latest screenshot or parsed board state."""
     global latest_screenshot_path, latest_parsed_board
     
-    if not latest_screenshot_path or not os.path.exists(latest_screenshot_path):
+    with state_lock:
+        local_path = latest_screenshot_path
+        local_board = latest_parsed_board
+        
+    if not local_path or not os.path.exists(local_path):
         return jsonify({"status": "error", "message": "No capture available"}), 404
         
     if request.args.get('image') == 'true':
-        return send_file(latest_screenshot_path, mimetype='image/png')
+        return send_file(local_path, mimetype='image/png')
         
     from src import game_engine
-    grid = game_engine.board_to_list(latest_parsed_board) if latest_parsed_board is not None else None
+    grid = game_engine.board_to_list(local_board) if local_board is not None else None
     return jsonify({
         "parsed_board": grid,
-        "board_hex": hex(latest_parsed_board) if latest_parsed_board is not None else None,
+        "board_hex": hex(local_board) if local_board is not None else None,
         "screenshot_url": "/capture/latest?image=true"
     })
 

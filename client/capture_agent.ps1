@@ -12,6 +12,13 @@ $pollIntervalMs = 500              # Poll server status every 500ms
 $errorRateLimitSeconds = 5        # Limit connection error prints to once every 5s
 $adbPath = "adb"                  # Command name or full path to adb
 $curlPath = "curl.exe"            # Command name or full path to curl
+
+# Swipe gestures (x1 y1 x2 y2 duration_ms) - customizable via client_config.ps1
+$swipeLeft  = @("780", "1325", "240", "1325", "120")
+$swipeRight = @("240", "1325", "780", "1325", "120")
+$swipeUp    = @("512", "1560", "512", "1090", "120")
+$swipeDown  = @("512", "1090", "512", "1560", "120")
+$postSwipeSleepMs = 350
 # -----------------------------
 
 # Load local configuration file if it exists (allows local overrides without committing personal paths)
@@ -77,6 +84,7 @@ if (-not $resolvedCurl) {
 $curlPath = $resolvedCurl
 
 $lastErrorTime = [DateTime]::MinValue
+$lastSeenActionSeq = -1
 
 Write-Host "=== Windows Capture Agent Running ==="
 Write-Host "Target Server: $server"
@@ -90,10 +98,49 @@ $screenshotFile = Join-Path $scriptDir "latest.png"
 
 while ($true) {
     try {
-        # Poll the server to check if a screenshot is requested
+        # Poll the server to check if a screenshot or swipe action is requested
         $response = Invoke-RestMethod -Uri "$server/capture/poll" -Method Get -TimeoutSec 3
 
-        if ($response.capture_requested) {
+        if ($response.action_requested -and $response.action_seq -ne $lastSeenActionSeq) {
+            $action = $response.action_requested
+            $actionSeq = $response.action_seq
+            $coords = $response.swipe_coords
+            $lastSeenActionSeq = $actionSeq
+
+            # Execute swipe using coordinates from server (fallback to local defaults if not provided)
+            # Coordinates are splatted (@coords) to pass each item as a separate process argument.
+            if ($coords) {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Action requested: $action [seq: $actionSeq] (Dynamic coords: $coords). Executing swipe..." -ForegroundColor Cyan
+                & $adbPath shell input swipe @coords
+            } else {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Action requested: $action [seq: $actionSeq] (Default coords). Executing swipe..." -ForegroundColor Cyan
+                switch ($action) {
+                    "UP"    { & $adbPath shell input swipe @swipeUp }
+                    "DOWN"  { & $adbPath shell input swipe @swipeDown }
+                    "LEFT"  { & $adbPath shell input swipe @swipeLeft }
+                    "RIGHT" { & $adbPath shell input swipe @swipeRight }
+                }
+            }
+
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Swipe completed. Waiting $postSwipeSleepMs ms..."
+            Start-Sleep -Milliseconds $postSwipeSleepMs
+
+            # Automatically take post-action screencap
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Taking post-action screencap..."
+            $cmd = "`"$adbPath`" exec-out screencap -p > `"$screenshotFile`""
+            cmd /c $cmd
+
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $screenshotFile)) {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Uploading post-action screenshot to server..."
+
+                # Upload PNG with metadata parameters for tracking/debugging
+                $uploadUrl = "$server/capture/upload?source=post_action&action=$action&action_seq=$actionSeq"
+                & $curlPath -s -F "file=@$screenshotFile" $uploadUrl
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Post-action screenshot uploaded successfully."
+            } else {
+                Write-Warning "Post-action screencap failed. Check ADB connection."
+            }
+        } elseif ($response.capture_requested) {
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Capture requested! Taking adb screencap..."
 
             # Execute adb screencap and pipe raw output to latest.png using cmd /c
@@ -104,8 +151,9 @@ while ($true) {
             if ($LASTEXITCODE -eq 0 -and (Test-Path $screenshotFile)) {
                 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Uploading latest.png to server..."
 
-                # Upload PNG using curl.exe
-                & $curlPath -s -F "file=@$screenshotFile" "$server/capture/upload"
+                # Upload PNG using curl.exe with source parameter
+                $uploadUrl = "$server/capture/upload?source=manual"
+                & $curlPath -s -F "file=@$screenshotFile" $uploadUrl
                 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Screenshot uploaded successfully."
             } else {
                 Write-Warning "adb command failed or latest.png was not created. Is your Android device connected via ADB?"

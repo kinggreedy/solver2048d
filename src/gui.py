@@ -808,7 +808,7 @@ class Solver2048dGUI(QMainWindow):
     def request_android_capture(self):
         """Signals the background Flask server that a capture is requested."""
         import src.capture_server as capture_server
-        capture_server.capture_requested = True
+        capture_server.set_capture_requested(True)
         self.lbl_capture_status.setText("⏳ Waiting for Android...")
         self.statusBar().showMessage("Android capture request sent to server.", 2000)
 
@@ -822,16 +822,15 @@ class Solver2048dGUI(QMainWindow):
             self.save_history()
             self.current_board = board_int
             
-            # If waiting for spawn, auto-confirm and return to normal
-            if self.gui_state == "WAITING_FOR_SPAWN":
-                self.gui_state = "NORMAL"
-                self.reset_confirm_spawn_button()
-                self.update_gui_state_display()
-                
-            self.update_board_display()
             self.lbl_capture_status.setText("✅ Parsed")
             self.statusBar().showMessage("Board updated from Android capture!", 4000)
-            self.run_solver()
+            
+            # If waiting for spawn, auto-confirm and return to normal
+            if self.gui_state == "WAITING_FOR_SPAWN":
+                self.confirm_spawn()
+            else:
+                self.update_board_display()
+                self.run_solver()
         else:
             self.lbl_capture_status.setText("❌ Parse Failed")
             self.statusBar().showMessage("Capture received, but board parsing failed! Check crop calibration.", 4000)
@@ -1174,7 +1173,6 @@ class Solver2048dGUI(QMainWindow):
             board_img = img.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
 
             # Determine a unique filename in tests/
-            import os
             tests_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tests")
             os.makedirs(tests_dir, exist_ok=True)
 
@@ -1440,11 +1438,44 @@ class Solver2048dGUI(QMainWindow):
         self.setFocus()
         
     def execute_recommended_move(self):
-        """Applies the recommended move currently calculated by the solver."""
+        """Applies the recommended move currently calculated by the solver and signals the agent to swipe."""
         if self.gui_state == "WAITING_FOR_SPAWN":
             return
         if getattr(self, 'last_rec_move', None) is not None:
-            self.execute_move(self.last_rec_move)
+            move_const = self.last_rec_move
+            self.execute_move(move_const)
+            
+            # Send action to capture server so the Android device executes it
+            import src.capture_server as capture_server
+            dir_str = {
+                game_engine.LEFT: "LEFT",
+                game_engine.UP: "UP",
+                game_engine.RIGHT: "RIGHT",
+                game_engine.DOWN: "DOWN"
+            }.get(move_const)
+            
+            if dir_str:
+                # Calculate dynamic swipe coordinates based on formulas
+                crop_x = self.spn_crop_x.value()
+                crop_y = self.spn_crop_y.value()
+                crop_w = self.spn_crop_w.value()
+                crop_h = self.spn_crop_h.value()
+                
+                cx = int(crop_x + crop_w / 2)
+                cy = int(crop_y + crop_h / 2)
+                x_offset = int(crop_w * 0.3)
+                y_offset = int(crop_h * 0.3)
+                
+                coords_map = {
+                    game_engine.LEFT:  [cx + x_offset, cy, cx - x_offset, cy, 120],
+                    game_engine.RIGHT: [cx - x_offset, cy, cx + x_offset, cy, 120],
+                    game_engine.UP:    [cx, cy + y_offset, cx, cy - y_offset, 120],
+                    game_engine.DOWN:  [cx, cy - y_offset, cx, cy + y_offset, 120]
+                }
+                swipe_coords = coords_map.get(move_const)
+                
+                capture_server.set_action_requested(dir_str, swipe_coords)
+                self.lbl_capture_status.setText(f"⚡ Swiping {dir_str}...")
         else:
             self.statusBar().showMessage("No recommended move to apply!", 2000)
         
