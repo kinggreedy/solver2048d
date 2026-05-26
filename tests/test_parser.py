@@ -2,6 +2,7 @@
 import unittest
 import os
 import sys
+import json
 from PIL import Image
 
 # Add src to path
@@ -44,6 +45,17 @@ class TestImageParser(unittest.TestCase):
             # Add more samples here:
             # { "name": "sample2.png", "ground_truth": [...] }
         ]
+        
+        # Load dynamic samples if they exist
+        tests_dir = os.path.dirname(__file__)
+        dynamic_path = os.path.join(tests_dir, "dynamic_samples.json")
+        if os.path.exists(dynamic_path):
+            try:
+                with open(dynamic_path, "r") as f:
+                    dynamic_data = json.load(f)
+                    self.samples.extend(dynamic_data)
+            except Exception as e:
+                print(f"Error loading dynamic samples: {e}")
 
     def test_all_samples(self):
         tests_dir = os.path.dirname(__file__)
@@ -70,6 +82,10 @@ class TestImageParser(unittest.TestCase):
                 self.config['capture']['crop_y'] = 0
                 self.config['capture']['crop_w'] = w
                 self.config['capture']['crop_h'] = h
+                
+                # Mock mode if specified in test case
+                if "mode" in sample:
+                    self.config['capture']['mode'] = sample["mode"]
                 
                 import time
                 start_time = time.perf_counter()

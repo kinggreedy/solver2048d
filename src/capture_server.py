@@ -12,6 +12,7 @@ latest_parsed_board = None
 
 # Callback trigger to notify GUI thread
 on_capture_received_callback = None
+on_status_changed_callback = None
 
 @app.route('/capture/request', methods=['POST'])
 def capture_request():
@@ -49,6 +50,10 @@ def capture_upload():
         # Save screenshot
         file.save(save_path)
         latest_screenshot_path = save_path
+        
+        # Notify GUI that we have received the image and are starting parsing
+        if on_status_changed_callback:
+            on_status_changed_callback("Parsing...")
         
         # Parse board image
         import src.image_parser as image_parser
@@ -91,10 +96,11 @@ def capture_latest():
         "screenshot_url": "/capture/latest?image=true"
     })
 
-def start_server(port=5000, callback=None):
+def start_server(port=5000, callback=None, status_callback=None):
     """Starts the Flask server on a daemon thread to prevent locking the PyQt app."""
-    global on_capture_received_callback
+    global on_capture_received_callback, on_status_changed_callback
     on_capture_received_callback = callback
+    on_status_changed_callback = status_callback
     
     # Mute Flask's standard output logs to keep the terminal clean
     import logging
