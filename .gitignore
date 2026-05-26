@@ -9,6 +9,7 @@ logs/*
 
 # Temporary capture files
 client/latest.png
+client/client_config.ps1
 temp_test_screenshot.png
 
 # System files

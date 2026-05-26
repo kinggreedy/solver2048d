@@ -96,9 +96,9 @@ heuristics:
 capture:
   enabled: true
   port: 5000
-  crop_x: 100
-  crop_y: 500
-  crop_w: 880
+  crop_x: 40
+  crop_y: 900
+  crop_w: 950
   crop_h: 880
   # Expected RGB colors for tile levels 0-11 in screenshots
   colors:

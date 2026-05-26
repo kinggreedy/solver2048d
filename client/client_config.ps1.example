@@ -1,0 +1,15 @@
+# client_config.ps1.example
+# Copy this file to "client_config.ps1" in the same directory and customize the values below.
+# "client_config.ps1" is ignored by git, so your local environment details won't be committed.
+
+# 1. Server Address (Ubuntu solver GUI port)
+$server = "http://localhost:55781"
+
+# 2. Executable Paths
+# If adb.exe or curl.exe are not in your system environment PATH, define their full paths here:
+# $adbPath = "E:\Program\scrcpy\adb.exe"
+# $curlPath = "C:\Windows\System32\curl.exe"
+
+# 3. Execution Options
+$pollIntervalMs = 500
+$errorRateLimitSeconds = 10
