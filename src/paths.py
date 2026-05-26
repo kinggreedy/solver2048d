@@ -7,6 +7,7 @@ ROOT_DIR = os.path.dirname(SRC_DIR)
 
 # Configuration file path
 CONFIG_PATH = os.path.join(ROOT_DIR, "config.yaml")
+CAPTURE_CONFIG_PATH = os.path.join(ROOT_DIR, "capture_config.yaml")
 
 # Directory for gameplay logs
 LOGS_DIR = os.path.join(ROOT_DIR, "logs")

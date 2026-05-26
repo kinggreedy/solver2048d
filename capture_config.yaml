@@ -1,0 +1,115 @@
+capture:
+  collect_ocr: true
+  colors_level:
+    0:
+    - 46
+    - 46
+    - 56
+    1:
+    - 79
+    - 172
+    - 254
+    2:
+    - 0
+    - 242
+    - 254
+    3:
+    - 76
+    - 175
+    - 80
+    4:
+    - 0
+    - 230
+    - 118
+    5:
+    - 255
+    - 235
+    - 59
+    6:
+    - 255
+    - 152
+    - 0
+    7:
+    - 255
+    - 87
+    - 34
+    8:
+    - 244
+    - 67
+    - 54
+    9:
+    - 213
+    - 0
+    - 249
+    10:
+    - 101
+    - 31
+    - 255
+    11:
+    - 55
+    - 71
+    - 79
+  colors_x:
+    # Colors are sampled at 70% cell height, 35/50/65% cell width (dish background below fish body).
+    # Calibrated from actual screenshots with blue-light filter warm shift.
+    # x2 = white dish, x4 = gold dish, x8 = green dish, x32 = blue dish, x64 = purple dish.
+    0:
+    - 242
+    - 227
+    - 196
+    1:
+    - 242
+    - 242
+    - 240
+    2:
+    - 220
+    - 216
+    - 151
+    3:
+    - 157
+    - 206
+    - 134
+    4:
+    - 155
+    - 200
+    - 170
+    5:
+    - 154
+    - 186
+    - 182
+    6:
+    - 192
+    - 127
+    - 99
+    7:
+    - 150
+    - 100
+    - 140
+    8:
+    - 140
+    - 90
+    - 160
+    9:
+    - 130
+    - 80
+    - 170
+    10:
+    - 120
+    - 70
+    - 180
+    11:
+    - 110
+    - 60
+    - 190
+  crop_h: 770
+  crop_w: 893
+  crop_x: 65
+  crop_y: 940
+  # Luminance threshold for center pixel: cells with center lum >= this are potential Level 0 (empty).
+  empty_lum_threshold: 200
+  # Standard deviation threshold: cells with grayscale stddev < this are Level 0 (empty).
+  # Increased to 50.0 to handle shading gradients and noise in empty cells.
+  empty_stddev_threshold: 50.0
+  enabled: true
+  mode: x
+  port: 55781

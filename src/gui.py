@@ -19,7 +19,7 @@ class CaptureSignalEmitter(QObject):
 from src import game_engine
 from src import solver
 from src import stats
-from src.paths import CONFIG_PATH, LATEST_SCREENSHOT_PATH
+from src.paths import CONFIG_PATH, LATEST_SCREENSHOT_PATH, LOGS_DIR
 
 class SolverThread(QThread):
     solver_finished = pyqtSignal(int)   # generation
@@ -211,6 +211,7 @@ class Solver2048dGUI(QMainWindow):
             capture_server.start_server(port=port, callback=server_cb)
             
     def init_ui(self):
+        capture_cfg = self.config.get('capture', {})
         self.setWindowTitle("Solver 2048d — KDE Remote Desktop Helper")
         self.resize(1380, 680)
         
@@ -280,16 +281,77 @@ class Solver2048dGUI(QMainWindow):
                 color: #a0a0b0;
                 font-family: monospace;
             }
+            QCheckBox {
+                color: #b0bec5;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QSpinBox {
+                background-color: #2a2a35;
+                color: #ffffff;
+                border: 1px solid #3d3d4b;
+                border-radius: 4px;
+                padding: 4px;
+                padding-right: 20px;
+            }
+            QSpinBox:hover {
+                border-color: #5d5d75;
+            }
+            QSpinBox::up-button {
+                subcontrol-origin: border;
+                subcontrol-position: top right;
+                width: 18px;
+                border-left: 1px solid #3d3d4b;
+                border-bottom: 1px solid #3d3d4b;
+                border-top-right-radius: 4px;
+                background-color: #2a2a35;
+            }
+            QSpinBox::up-button:hover {
+                background-color: #353545;
+            }
+            QSpinBox::up-arrow {
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-bottom: 5px solid #e0e0e0;
+                width: 0;
+                height: 0;
+            }
+            QSpinBox::up-arrow:disabled, QSpinBox::up-arrow:off {
+                border-bottom-color: #666677;
+            }
+            QSpinBox::down-button {
+                subcontrol-origin: border;
+                subcontrol-position: bottom right;
+                width: 18px;
+                border-left: 1px solid #3d3d4b;
+                border-bottom-right-radius: 4px;
+                background-color: #2a2a35;
+            }
+            QSpinBox::down-button:hover {
+                background-color: #353545;
+            }
+            QSpinBox::down-arrow {
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #e0e0e0;
+                width: 0;
+                height: 0;
+            }
+            QSpinBox::down-arrow:disabled, QSpinBox::down-arrow:off {
+                border-top-color: #666677;
+            }
         """)
         
         # ------------------ LEFT COLUMN (Board Panel) ------------------
         left_panel = QFrame()
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(15, 15, 15, 15)
+        left_layout.setContentsMargins(15, 10, 15, 15)
+        left_layout.setSpacing(5)
         
         # Title and Game Stats
         header_label = QLabel("BOARD VIEW")
-        header_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #4facfe;")
+        header_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #4facfe; margin-bottom: 2px;")
+        header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         left_layout.addWidget(header_label)
         
         # Stats Display Grid
@@ -417,11 +479,13 @@ class Solver2048dGUI(QMainWindow):
         # ------------------ RIGHT COLUMN (Solver & Stats) ------------------
         right_panel = QFrame()
         right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(15, 15, 15, 15)
+        right_layout.setContentsMargins(15, 10, 15, 15)
+        right_layout.setSpacing(5)
         
         # Solver Header
         solver_header = QLabel("SOLVER RECOMMENDATION")
-        solver_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #00e676;")
+        solver_header.setStyleSheet("font-size: 15px; font-weight: bold; color: #00e676; margin-bottom: 2px;")
+        solver_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         right_layout.addWidget(solver_header)
         
         # Config options and Solver Budget Settings
@@ -445,13 +509,11 @@ class Solver2048dGUI(QMainWindow):
         
         self.chk_x8 = QCheckBox("X8")
         self.chk_x8.setChecked(False)
-        self.chk_x8.setStyleSheet("color: #b0bec5; font-size: 13px; font-weight: bold;")
         self.chk_x8.stateChanged.connect(self.run_solver)
         x_modes_layout.addWidget(self.chk_x8)
         
         self.chk_x16 = QCheckBox("X16")
         self.chk_x16.setChecked(False)
-        self.chk_x16.setStyleSheet("color: #b0bec5; font-size: 13px; font-weight: bold;")
         self.chk_x16.stateChanged.connect(self.run_solver)
         x_modes_layout.addWidget(self.chk_x16)
         
@@ -459,7 +521,6 @@ class Solver2048dGUI(QMainWindow):
         
         self.chk_empirical_spawn = QCheckBox("Use Empirical Spawns")
         self.chk_empirical_spawn.setChecked(True)
-        self.chk_empirical_spawn.setStyleSheet("color: #b0bec5; font-size: 13px; font-weight: bold;")
         self.chk_empirical_spawn.stateChanged.connect(self.run_solver)
         settings_layout.addWidget(self.chk_empirical_spawn, 0, 3)
         
@@ -572,35 +633,59 @@ class Solver2048dGUI(QMainWindow):
         # ------------------ RIGHTMOST COLUMN (Android Capture & Calibration) ------------------
         capture_panel = QFrame()
         capture_layout = QVBoxLayout(capture_panel)
-        capture_layout.setContentsMargins(15, 15, 15, 15)
+        capture_layout.setContentsMargins(15, 10, 15, 15)
+        capture_layout.setSpacing(5)
         
         capture_header = QLabel("ANDROID CAPTURE")
-        capture_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #4facfe;")
+        capture_header.setStyleSheet("font-size: 15px; font-weight: bold; color: #4facfe; margin-bottom: 2px;")
+        capture_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         capture_layout.addWidget(capture_header)
         
-        # Action Button
-        self.btn_capture_now = QPushButton("📸 Capture Android")
-        self.btn_capture_now.setStyleSheet("background-color: #0d47a1; border-color: #1565c0; font-size: 14px; padding: 8px;")
+        # Grid settings region (Single row super-compact)
+        capture_settings_frame = QFrame()
+        capture_settings_frame.setStyleSheet("QFrame { background-color: #1e1e24; border: 1px solid #2d2d35; border-radius: 8px; padding: 4px; }")
+        capture_settings_layout = QGridLayout(capture_settings_frame)
+        capture_settings_layout.setContentsMargins(6, 6, 6, 6)
+        capture_settings_layout.setSpacing(6)
+
+        # 25% | 25% | 50% distribution
+        capture_settings_layout.setColumnStretch(0, 1)
+        capture_settings_layout.setColumnStretch(1, 1)
+        capture_settings_layout.setColumnStretch(2, 2)
+
+        # Column 0: Action Button (25%)
+        self.btn_capture_now = QPushButton("📸 Capture")
+        self.btn_capture_now.setStyleSheet("background-color: #0d47a1; border-color: #1565c0; font-weight: bold; padding: 4px;")
         self.btn_capture_now.clicked.connect(self.request_android_capture)
-        capture_layout.addWidget(self.btn_capture_now)
+        capture_settings_layout.addWidget(self.btn_capture_now, 0, 0)
         
-        capture_cfg = self.config.get('capture', {})
-        port = capture_cfg.get('port', 5000)
-        self.lbl_capture_status = QLabel(f"Status: Server listening on port {port}")
-        self.lbl_capture_status.setStyleSheet("color: #b0bec5; font-weight: bold;")
+        # Column 1: Capture Mode (25%)
+        self.cmb_capture_mode = QComboBox()
+        self.cmb_capture_mode.addItems(["Lv.1...", "x2, x4..."])
+        self.cmb_capture_mode.setStyleSheet("background-color: #2a2a35; padding: 2px; border-radius: 4px; font-size: 12px;")
+        cap_mode = self.config.get('capture', {}).get('mode', 'level')
+        self.cmb_capture_mode.setCurrentIndex(1 if cap_mode == 'x' else 0)
+        self.cmb_capture_mode.currentIndexChanged.connect(self.handle_capture_mode_changed)
+        capture_settings_layout.addWidget(self.cmb_capture_mode, 0, 1)
+
+        # Column 2: Status Label (50%)
+        self.lbl_capture_status = QLabel("Idle")
+        self.lbl_capture_status.setStyleSheet("color: #b0bec5; font-weight: bold; font-size: 12px; background-color: #15151b; border-radius: 4px; padding: 4px;")
         self.lbl_capture_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        capture_layout.addWidget(self.lbl_capture_status)
+        capture_settings_layout.addWidget(self.lbl_capture_status, 0, 2)
+        
+        capture_layout.addWidget(capture_settings_frame)
         
         # Live Preview Label
         self.lbl_screenshot_preview = QLabel("No screenshot uploaded yet.\n\nStart PowerShell agent on Windows,\nthen click Capture Android.")
         self.lbl_screenshot_preview.setStyleSheet("border: 1px dashed #424242; border-radius: 4px; background-color: #15151b; color: #78909c;")
         self.lbl_screenshot_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_screenshot_preview.setMinimumHeight(300)
+        self.lbl_screenshot_preview.setMinimumHeight(550)
         capture_layout.addWidget(self.lbl_screenshot_preview)
         
         # Calibration Controls (SpinBoxes)
         calibration_frame = QFrame()
-        calibration_frame.setStyleSheet("background-color: #1e1e24; border: 1px solid #2d2d35; padding: 8px;")
+        calibration_frame.setStyleSheet("QFrame { background-color: #1e1e24; border: 1px solid #2d2d35; padding: 8px; }")
         cal_layout = QGridLayout(calibration_frame)
         cal_layout.setSpacing(6)
         
@@ -633,25 +718,51 @@ class Solver2048dGUI(QMainWindow):
         cal_layout.addWidget(self.spn_crop_h, 1, 3)
         
         capture_layout.addWidget(calibration_frame)
-        
-        # Action controls for calibration
-        cal_actions = QHBoxLayout()
-        
+
+        # Action controls for calibration — wrapped in a dark frame so checkboxes
+        # inherit the global dark-theme stylesheet (same as solver settings_frame).
+        cal_actions_frame = QFrame()
+        cal_actions_frame.setStyleSheet(
+            "background-color: #1e1e24; border: 1px solid #2d2d35; border-radius: 8px; padding: 6px; margin-top: 2px;"
+        )
+        cal_actions = QHBoxLayout(cal_actions_frame)
+        cal_actions.setContentsMargins(4, 2, 4, 2)
+        cal_actions.setSpacing(8)
+
         self.chk_show_grid = QCheckBox("Grid Overlay")
         self.chk_show_grid.setChecked(True)
         self.chk_show_grid.stateChanged.connect(self.update_screenshot_display)
         cal_actions.addWidget(self.chk_show_grid)
-        
+
+        self.chk_collect_ocr = QCheckBox("Collect OCR Data")
+        self.chk_collect_ocr.setChecked(capture_cfg.get('collect_ocr', False))
+        self.chk_collect_ocr.stateChanged.connect(self.handle_ocr_collect_changed)
+        cal_actions.addWidget(self.chk_collect_ocr)
+
+        cal_actions.addStretch()
+
         self.btn_reparse = QPushButton("🔄 Reparse")
         self.btn_reparse.clicked.connect(self.reparse_current_screenshot)
         cal_actions.addWidget(self.btn_reparse)
-        
+
+        self.btn_debug_crop = QPushButton("📸 Crop Debug")
+        self.btn_debug_crop.clicked.connect(self.recreate_crop_debug_image)
+        cal_actions.addWidget(self.btn_debug_crop)
+
+        self.btn_calibrate_colors = QPushButton("🎨 Calibrate Colors")
+        self.btn_calibrate_colors.setToolTip(
+            "Sample dish colors from the current screenshot using the confirmed board as ground truth.\n"
+            "Reparse first, correct any wrong tiles manually, then click this to update colors_x in config.yaml."
+        )
+        self.btn_calibrate_colors.clicked.connect(self.calibrate_colors_from_board)
+        cal_actions.addWidget(self.btn_calibrate_colors)
+
         self.btn_save_cal = QPushButton("💾 Save Crop")
         self.btn_save_cal.setStyleSheet("background-color: #00796b; color: white;")
         self.btn_save_cal.clicked.connect(self.save_crop_settings)
         cal_actions.addWidget(self.btn_save_cal)
-        
-        capture_layout.addLayout(cal_actions)
+
+        capture_layout.addWidget(cal_actions_frame)
         
         main_layout.addWidget(capture_panel, 9)
         
@@ -663,30 +774,40 @@ class Solver2048dGUI(QMainWindow):
         """Signals the background Flask server that a capture is requested."""
         import src.capture_server as capture_server
         capture_server.capture_requested = True
-        self.lbl_capture_status.setText("Status: Waiting for Windows agent...")
+        self.lbl_capture_status.setText("Waiting for Android...")
         self.statusBar().showMessage("Android capture request sent to server.", 2000)
 
     def handle_incoming_capture(self, filepath, grid):
         """Thread-safe slot triggered when a new screenshot is uploaded and parsed."""
         self.latest_screenshot_path = filepath
-        self.lbl_capture_status.setText("Status: Screenshot received!")
+        self.lbl_capture_status.setText("Screenshot received!")
         self.update_screenshot_display()
         
-        if grid:
-            board_int = game_engine.list_to_board(grid)
-            self.save_history()
-            self.current_board = board_int
-            
-            # If waiting for spawn, auto-confirm and return to normal
-            if self.gui_state == "WAITING_FOR_SPAWN":
-                self.gui_state = "NORMAL"
-                self.reset_confirm_spawn_button()
-                self.update_gui_state_display()
+        # Simulate parsing phase visibility
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(500, lambda: self.lbl_capture_status.setText("Parsing..."))
+        
+        def finish_capture():
+            if grid:
+                board_int = game_engine.list_to_board(grid)
+                self.save_history()
+                self.current_board = board_int
                 
-            self.update_board_display()
-            self.statusBar().showMessage("Board updated from Android capture! Review and click Solve.", 4000)
-        else:
-            self.statusBar().showMessage("Capture received, but board parsing failed! Check crop calibration.", 4000)
+                # If waiting for spawn, auto-confirm and return to normal
+                if self.gui_state == "WAITING_FOR_SPAWN":
+                    self.gui_state = "NORMAL"
+                    self.reset_confirm_spawn_button()
+                    self.update_gui_state_display()
+                    
+                self.update_board_display()
+                self.lbl_capture_status.setText("Parsed ✅")
+                self.statusBar().showMessage("Board updated from Android capture!", 4000)
+                self.run_solver()
+            else:
+                self.lbl_capture_status.setText("Parse Failed ❌")
+                self.statusBar().showMessage("Capture received, but board parsing failed! Check crop calibration.", 4000)
+        
+        QTimer.singleShot(1200, finish_capture)
 
     def handle_calibration_changed(self):
         """Fires when crop parameters are edited in the calibration panel."""
@@ -698,6 +819,27 @@ class Solver2048dGUI(QMainWindow):
         self.config['capture']['crop_h'] = self.spn_crop_h.value()
         
         self.update_screenshot_display()
+
+    def handle_capture_mode_changed(self):
+        """Fires when the capture parse mode dropdown is modified."""
+        if 'capture' not in self.config:
+            self.config['capture'] = {}
+        
+        index = self.cmb_capture_mode.currentIndex()
+        if index == 1:
+            self.config['capture']['mode'] = 'x'
+        else:
+            self.config['capture']['mode'] = 'level'
+            
+        # Re-parse if there is an active screenshot
+        if getattr(self, 'latest_screenshot_path', None) and os.path.exists(self.latest_screenshot_path):
+            self.reparse_current_screenshot()
+
+    def handle_ocr_collect_changed(self):
+        """Fires when the Collect OCR Data checkbox is toggled."""
+        if 'capture' not in self.config:
+            self.config['capture'] = {}
+        self.config['capture']['collect_ocr'] = self.chk_collect_ocr.isChecked()
 
     def update_screenshot_display(self):
         """Draws the crop box and 4x4 grid overlay on the latest screenshot and scales it to fit."""
@@ -748,6 +890,38 @@ class Solver2048dGUI(QMainWindow):
                 Qt.TransformationMode.SmoothTransformation
             )
             self.lbl_screenshot_preview.setPixmap(scaled)
+            
+            # Automatically save the cropped board region with grid overlay to logs/debug_cropped.png
+            try:
+                from PIL import Image, ImageDraw
+                img = Image.open(self.latest_screenshot_path)
+                img_w, img_h = img.size
+                
+                # Clamp coordinates to avoid PIL errors
+                c_x = max(0, min(x, img_w - 1))
+                c_y = max(0, min(y, img_h - 1))
+                c_w = min(w, img_w - c_x)
+                c_h = min(h, img_h - c_y)
+                
+                if c_w > 0 and c_h > 0:
+                    board_img = img.crop((c_x, c_y, c_x + c_w, c_y + c_h))
+                    debug_img = board_img.copy()
+                    draw = ImageDraw.Draw(debug_img)
+                    
+                    # Draw grid lines on the crop
+                    cell_w = c_w / 4
+                    cell_h = c_h / 4
+                    for i in range(1, 4):
+                        vx = int(i * cell_w)
+                        draw.line([(vx, 0), (vx, c_h)], fill=(255, 0, 0), width=3)
+                        vy = int(i * cell_h)
+                        draw.line([(0, vy), (c_w, vy)], fill=(255, 0, 0), width=3)
+                    draw.rectangle([(0, 0), (c_w - 1, c_h - 1)], outline=(255, 0, 0), width=4)
+                    
+                    debug_path = os.path.join(LOGS_DIR, "debug_cropped.png")
+                    debug_img.save(debug_path)
+            except Exception as e:
+                print(f"Error saving debug_cropped.png from GUI: {e}")
         except Exception as e:
             print(f"Error drawing screenshot overlay: {e}")
 
@@ -757,6 +931,8 @@ class Solver2048dGUI(QMainWindow):
             self.statusBar().showMessage("No screenshot available to reparse!", 2000)
             return
             
+        self.lbl_capture_status.setText("Parsing...")
+        
         import src.image_parser as image_parser
         grid = image_parser.parse_screenshot(self.latest_screenshot_path)
         if grid:
@@ -770,8 +946,11 @@ class Solver2048dGUI(QMainWindow):
                 self.update_gui_state_display()
                 
             self.update_board_display()
+            self.lbl_capture_status.setText("Parsed ✅")
             self.statusBar().showMessage("Board reparsed and updated successfully!", 3000)
+            self.run_solver()
         else:
+            self.lbl_capture_status.setText("Parse Failed ❌")
             self.statusBar().showMessage("Reparsing failed! Adjust calibration and retry.", 3000)
 
     def save_crop_settings(self):
@@ -790,12 +969,148 @@ class Solver2048dGUI(QMainWindow):
             yaml_data['capture']['crop_w'] = self.spn_crop_w.value()
             yaml_data['capture']['crop_h'] = self.spn_crop_h.value()
             
+            # Save the active parsing mode
+            index = self.cmb_capture_mode.currentIndex()
+            yaml_data['capture']['mode'] = 'x' if index == 1 else 'level'
+            
+            # Save the OCR collection setting
+            yaml_data['capture']['collect_ocr'] = self.chk_collect_ocr.isChecked()
+            
             with open(config_path, "w") as f:
                 yaml.safe_dump(yaml_data, f, default_flow_style=False)
                 
             self.statusBar().showMessage("Crop settings saved to config.yaml successfully!", 3000)
         except Exception as e:
             self.statusBar().showMessage(f"Failed to save crop settings: {e}", 3000)
+            
+    def recreate_crop_debug_image(self):
+        """Forces manual regeneration of logs/debug_cropped.png and shows feedback."""
+        if not getattr(self, 'latest_screenshot_path', None) or not os.path.exists(self.latest_screenshot_path):
+            self.statusBar().showMessage("No screenshot available to crop!", 2000)
+            return
+
+        self.update_screenshot_display()
+        self.statusBar().showMessage("Recreated logs/debug_cropped.png successfully!", 3000)
+
+    def calibrate_colors_from_board(self):
+        """Auto-calibrates colors_x in config.yaml by sampling dish colors at Y=70% of each
+        non-empty cell, using the currently confirmed board (self.current_board) as ground truth.
+
+        Workflow:
+          1. Reparse the screenshot (Reparse button) so the board looks roughly right.
+          2. Correct any wrong tile values by clicking the tile buttons on the board display.
+          3. Click 'Calibrate Colors' — this reads the confirmed board and samples the dish colour
+             at the bottom of each cell (Y=70%, X=35/50/65%) to derive the per-level reference colours.
+          4. Click 'Save Crop' to persist the updated config.yaml.
+        """
+        if not getattr(self, 'latest_screenshot_path', None) or not os.path.exists(self.latest_screenshot_path):
+            self.statusBar().showMessage("No screenshot available — capture a frame first!", 3000)
+            return
+
+        try:
+            from PIL import Image
+            import yaml
+            from src import game_engine as ge
+
+            cfg = self.config.get('capture', {})
+            mode = cfg.get('mode', 'level')
+            if mode != 'x':
+                self.statusBar().showMessage("Calibrate Colors is only supported in 'x' mode.", 3000)
+                return
+
+            crop_x = cfg.get('crop_x', 65)
+            crop_y = cfg.get('crop_y', 940)
+            crop_w = cfg.get('crop_w', 893)
+            crop_h = cfg.get('crop_h', 770)
+
+            img = Image.open(self.latest_screenshot_path).convert("RGB")
+            board_img = img.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
+            img_w, img_h = board_img.size
+            cell_w = crop_w / 4
+            cell_h = crop_h / 4
+
+            # Collect dish-color samples per level from the confirmed board
+            samples_per_level = {}
+            for idx in range(16):
+                r, c = divmod(idx, 4)
+                lvl = ge.get_cell(self.current_board, r, c)
+                if lvl == 0:
+                    continue  # skip empty cells
+
+                cl = int(c * cell_w)
+                ct = int(r * cell_h)
+                cw_i = int((c + 1) * cell_w) - cl
+                ch_i = int((r + 1) * cell_h) - ct
+
+                # Sample three points at Y=70% (dish background below fish body)
+                pts = []
+                for fx in [0.35, 0.50, 0.65]:
+                    px = max(0, min(int(cl + fx * cw_i), img_w - 1))
+                    py = max(0, min(int(ct + 0.70 * ch_i), img_h - 1))
+                    pts.append(board_img.getpixel((px, py)))
+
+                avg = tuple(sum(p[k] for p in pts) // len(pts) for k in range(3))
+                samples_per_level.setdefault(lvl, []).append(avg)
+
+            if not samples_per_level:
+                self.statusBar().showMessage("Board appears empty — nothing to calibrate!", 3000)
+                return
+
+            # Average each level's samples
+            new_colors = {}
+            for lvl, samps in samples_per_level.items():
+                new_colors[lvl] = tuple(sum(s[k] for s in samps) // len(samps) for k in range(3))
+
+            # Load existing config, merge in new per-level colours, write back
+            with open(CONFIG_PATH, "r") as f:
+                yaml_data = yaml.safe_load(f) or {}
+
+            existing_colors = {}
+            raw = yaml_data.get('capture', {}).get('colors_x', {})
+            for k, v in raw.items():
+                try:
+                    existing_colors[int(k)] = tuple(v)
+                except (ValueError, TypeError):
+                    pass
+
+            # Merge: new samples override existing; unknown levels keep their old value
+            merged = dict(existing_colors)
+            merged.update(new_colors)
+
+            # Serialise back as list-of-ints (YAML-friendly)
+            merged_yaml = {str(k): list(merged[k]) for k in sorted(merged)}
+
+            if 'capture' not in yaml_data:
+                yaml_data['capture'] = {}
+            yaml_data['capture']['colors_x'] = merged_yaml
+
+            with open(CONFIG_PATH, "w") as f:
+                yaml.safe_dump(yaml_data, f, default_flow_style=False)
+
+            # Also update runtime config so next parse uses new colours immediately
+            self.config.setdefault('capture', {})['colors_x'] = {int(k): list(v) for k, v in merged.items()}
+
+            # Build summary message
+            lv_names = {0:'0',1:'x2',2:'x4',3:'x8',4:'x16',5:'x32',6:'x64',7:'x128',
+                        8:'x256',9:'x512',10:'x1024',11:'stone'}
+            lines = [f"Calibrated {len(new_colors)} tile level(s):"]
+            for lvl in sorted(new_colors):
+                r, g, b = new_colors[lvl]
+                n_samps = len(samples_per_level[lvl])
+                lines.append(f"  {lv_names.get(lvl, f'lvl{lvl}'):6s}: RGB=({r},{g},{b})  [{n_samps} sample(s)]")
+            summary = "\n".join(lines)
+            print(summary)
+            QMessageBox.information(self, "Color Calibration Done", summary)
+            self.statusBar().showMessage(
+                f"Colors calibrated for {len(new_colors)} level(s) and saved to config.yaml!", 4000
+            )
+
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            self.statusBar().showMessage(f"Calibration failed: {e}", 4000)
+            print(f"Calibration error:\n{tb}")
+
         
     def keyPressEvent(self, event: QKeyEvent):
         """Allows playing standard swipes using Arrow Keys."""
@@ -1114,18 +1429,25 @@ class Solver2048dGUI(QMainWindow):
         
     def update_board_display(self):
         grid = game_engine.board_to_list(self.current_board)
+        mode = self.config.get('capture', {}).get('mode', 'level')
+        
         for r in range(4):
             for c in range(4):
                 level = grid[r][c]
                 btn = self.buttons[r][c]
                 
-                # Set text
+                # Set text based on level and capture mode
                 if level == 0:
                     btn.setText("")
                 elif level == 11:
-                    btn.setText("🪨 11")
+                    btn.setText("🪨")
                 else:
-                    btn.setText(str(level))
+                    if mode == 'x':
+                        # In X mode, display the actual tile value (2, 4, 8...)
+                        btn.setText(str(2 ** level))
+                    else:
+                        # In Level mode, display the raw level (1, 2, 3...)
+                        btn.setText(str(level))
                     
                 # Set stylesheet
                 btn.setStyleSheet(self.get_tile_style(level))

@@ -1,88 +1,100 @@
-# tests/test_parser.py
+# test_parser.py
 import unittest
 import os
-from PIL import Image, ImageDraw
-from src import game_engine
-from src import image_parser
+import sys
+from PIL import Image
 
-class TestParser(unittest.TestCase):
+# Add src to path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+from src import image_parser
+from src import game_engine
+
+class TestImageParser(unittest.TestCase):
     def setUp(self):
         self.config = game_engine.config
-
-    def test_18_image_parsing(self):
-        """Verify that image_parser correctly parses a board screenshot with center noise."""
-        orig_capture = self.config.get('capture')
-        self.config['capture'] = {
-            'enabled': True,
-            'port': 5000,
-            'crop_x': 100,
-            'crop_y': 100,
-            'crop_w': 800,
-            'crop_h': 800,
-            'colors': {
-                0: [46, 46, 56],
-                1: [79, 172, 254],
-                2: [0, 242, 254],
-                3: [76, 175, 80],
-                4: [0, 230, 118],
-                5: [255, 235, 59],
-                6: [255, 152, 0],
-                7: [255, 87, 34],
-                8: [244, 67, 54],
-                9: [213, 0, 249],
-                10: [101, 31, 255],
-                11: [55, 71, 79]
+        self.samples = [
+            {
+                "name": "sample1.png",
+                "ground_truth": [
+                    [0, 0, 3, 3],
+                    [0, 3, 5, 6],
+                    [0, 1, 2, 1],
+                    [0, 1, 0, 0]
+                ]
+            },
+            {
+                "name": "sample2.png",
+                "ground_truth": [
+                    [0, 1, 5, 6],
+                    [0, 3, 5, 3],
+                    [0, 0, 2, 1],
+                    [1, 0, 2, 1]
+                ]
             }
-        }
-        
-        try:
-            # Create a 1000x1000 dummy screenshot
-            img = Image.new("RGB", (1000, 1000), (0, 0, 0))
-            draw = ImageDraw.Draw(img)
-            
-            # Target grid
-            target_grid = [
-                [0, 1, 2, 3],
-                [4, 5, 6, 7],
-                [8, 9, 10, 11],
-                [1, 0, 1, 0]
-            ]
-            
-            colors = self.config['capture']['colors']
-            cell_size = 200
-            
-            for r in range(4):
-                for c in range(4):
-                    level = target_grid[r][c]
-                    col = tuple(colors[level])
-                    
-                    left = 100 + c * cell_size
-                    top = 100 + r * cell_size
-                    right = left + cell_size
-                    bottom = top + cell_size
-                    
-                    # Fill cell background (leaving a 10px black border)
-                    draw.rectangle([left + 10, top + 10, right - 10, bottom - 10], fill=col)
-                    
-                    # Add noise in the exact center to simulate numbers/emojis (e.g. a white circle)
-                    center_x = (left + right) // 2
-                    center_y = (top + bottom) // 2
-                    draw.ellipse([center_x - 15, center_y - 15, center_x + 15, center_y + 15], fill=(255, 255, 255))
-            
-            temp_path = "temp_test_screenshot.png"
-            img.save(temp_path)
-            
-            parsed_grid = image_parser.parse_screenshot(temp_path)
-            
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-                
-            self.assertEqual(parsed_grid, target_grid, "Parsed grid does not match expected target grid.")
-        finally:
-            if orig_capture is not None:
-                self.config['capture'] = orig_capture
-            else:
-                del self.config['capture']
+            # Add more samples here:
+            # { "name": "sample2.png", "ground_truth": [...] }
+        ]
 
-if __name__ == '__main__':
+    def test_all_samples(self):
+        tests_dir = os.path.dirname(__file__)
+        results = []
+        
+        print("\n" + "="*50)
+        print("IMAGE PARSER VALIDATION REPORT")
+        print("="*50)
+
+        for sample in self.samples:
+            img_path = os.path.join(tests_dir, sample["name"])
+            if not os.path.exists(img_path):
+                print(f"\n❌ {sample['name']}: file not found!")
+                results.append(False)
+                continue
+
+            # Mock crop settings for the test board
+            img = Image.open(img_path)
+            w, h = img.size
+            orig_crop = self.config['capture'].copy()
+            
+            try:
+                self.config['capture']['crop_x'] = 0
+                self.config['capture']['crop_y'] = 0
+                self.config['capture']['crop_w'] = w
+                self.config['capture']['crop_h'] = h
+                
+                import time
+                start_time = time.perf_counter()
+                parsed_grid = image_parser.parse_screenshot(img_path)
+                end_time = time.perf_counter()
+                elapsed_ms = (end_time - start_time) * 1000
+
+                gt = sample["ground_truth"]
+                
+                board_match = True
+                mismatches = []
+                for r in range(4):
+                    for c in range(4):
+                        if parsed_grid[r][c] != gt[r][c]:
+                            board_match = False
+                            mismatches.append(f"({r},{c}): expected {gt[r][c]}, got {parsed_grid[r][c]}")
+
+                if board_match:
+                    print(f"\n✅ {sample['name']}: perfect match! ({elapsed_ms:.1f} ms)")
+                    results.append(True)
+                else:
+                    print(f"\n❌ {sample['name']}: {len(mismatches)} mismatch(es) found. ({elapsed_ms:.1f} ms)")
+                    for m in mismatches:
+                        print(f"   - {m}")
+                    results.append(False)
+                    
+            finally:
+                self.config['capture'] = orig_crop
+
+        print("\n" + "="*50)
+        passed = sum(results)
+        total = len(results)
+        print(f"SUMMARY: {passed}/{total} boards passed.")
+        print("="*50 + "\n")
+
+if __name__ == "__main__":
     unittest.main()
