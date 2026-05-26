@@ -9,6 +9,14 @@ class TestSolver(unittest.TestCase):
         self.config = game_engine.config
         self.orig_max_time = self.config['solver'].get('max_time_ms')
         self.config['solver']['max_time_ms'] = 0
+        
+        # Override spawn probabilities for deterministic simulations
+        self.orig_spawn_probs = self.config.get('spawn_probabilities', {}).copy()
+        self.config['spawn_probabilities'] = {
+            'event_1_low': 0.50,
+            'event_2_low': 0.35,
+            'event_2_low_1_high': 0.15
+        }
 
     def tearDown(self):
         if hasattr(self, 'orig_max_time'):
@@ -16,6 +24,8 @@ class TestSolver(unittest.TestCase):
                 self.config['solver']['max_time_ms'] = self.orig_max_time
             elif 'max_time_ms' in self.config['solver']:
                 del self.config['solver']['max_time_ms']
+        if hasattr(self, 'orig_spawn_probs'):
+            self.config['spawn_probabilities'] = self.orig_spawn_probs
 
     def test_8_solver_returns_valid_moves_only(self):
         """Solver returns only valid moves."""

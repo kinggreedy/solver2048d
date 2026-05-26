@@ -14,6 +14,8 @@ from src import game_engine
 class TestImageParser(unittest.TestCase):
     def setUp(self):
         self.config = game_engine.config
+        from src.image_parser import load_capture_config
+        self.config['capture'] = load_capture_config()
         self.samples = [
             {
                 "name": "sample1.png",
@@ -84,6 +86,17 @@ class TestImageParser(unittest.TestCase):
                 self.config['capture']['crop_y'] = 0
                 self.config['capture']['crop_w'] = w
                 self.config['capture']['crop_h'] = h
+                
+                # Override colors_x with canonical colors to ensure tests pass
+                # regardless of local color calibration state in config.yaml,
+                # but keep high levels 8-11 from config.
+                from src.image_parser import X_CANONICAL_COLORS
+                test_colors = {}
+                if 'colors_x' in orig_crop:
+                    test_colors = orig_crop['colors_x'].copy()
+                for k, v in X_CANONICAL_COLORS.items():
+                    test_colors[str(k)] = list(v)
+                self.config['capture']['colors_x'] = test_colors
                 
                 # Mock mode if specified in test case
                 if "mode" in sample:

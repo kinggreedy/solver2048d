@@ -16,28 +16,15 @@ ROW_SCORE_TABLE = [0] * 65536
 ROW_VALID_TABLE = [False] * 65536
 ROW_REVERSE_TABLE = [0] * 65536
 
-from src.paths import CONFIG_PATH, CAPTURE_CONFIG_PATH
+from src.paths import CONFIG_PATH
 
 def load_config(config_path=None):
-    """Loads and merges configuration from yaml files."""
+    """Loads configuration from yaml file."""
     if config_path is None:
         config_path = CONFIG_PATH
     
     with open(config_path, "r") as f:
         full_config = yaml.safe_load(f) or {}
-        
-    # Merge capture config if it exists
-    if os.path.exists(CAPTURE_CONFIG_PATH):
-        with open(CAPTURE_CONFIG_PATH, "r") as f:
-            capture_data = yaml.safe_load(f) or {}
-            # If main config already has 'capture', merge them; otherwise just assign
-            if 'capture' in capture_data:
-                if 'capture' not in full_config:
-                    full_config['capture'] = {}
-                full_config['capture'].update(capture_data['capture'])
-            else:
-                # If capture_config.yaml is flat or just the capture section
-                full_config.update(capture_data)
                 
     return full_config
 

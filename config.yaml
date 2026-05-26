@@ -14,40 +14,7 @@ appear_points:
   13: 0
   14: 0
   15: 0
-capture:
-  colors_x:
-    '1':
-    - 241
-    - 241
-    - 240
-    '2':
-    - 214
-    - 210
-    - 140
-    '3':
-    - 155
-    - 206
-    - 139
-    '4':
-    - 159
-    - 185
-    - 157
-    '5':
-    - 166
-    - 188
-    - 202
-    '6':
-    - 185
-    - 127
-    - 163
-    '7':
-    - 215
-    - 142
-    - 96
-    '8':
-    - 209
-    - 104
-    - 80
+
 decision:
   direct_conversion_value_per_energy: 2.0
   fresh_game_baseline_value_per_energy: 6.0
@@ -101,8 +68,8 @@ solver:
   risk_aversion: 2.0
 spawn_policy: truncated
 spawn_probabilities:
-  event_1_low: 0.856
   event_1_high: 0.14
-  event_2_low: 0.002
+  event_1_low: 0.856
   event_1_low_1_high: 0.001
   event_2_high: 0.001
+  event_2_low: 0.002

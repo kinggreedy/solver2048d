@@ -33,7 +33,21 @@ X_TEMPLATE_MATCH_THRESHOLD = 0.40
 def load_capture_config():
     """Loads configuration settings for screenshot capture."""
     config = game_engine.config
-    return config.get('capture', {})
+    if 'capture' in config and config['capture']:
+        return config['capture']
+
+    import yaml
+    from src.paths import CAPTURE_CONFIG_PATH
+    if os.path.exists(CAPTURE_CONFIG_PATH):
+        try:
+            with open(CAPTURE_CONFIG_PATH, "r") as f:
+                data = yaml.safe_load(f) or {}
+                if 'capture' in data:
+                    return data['capture']
+                return data
+        except Exception as e:
+            print(f"Error loading capture config from {CAPTURE_CONFIG_PATH}: {e}")
+    return {}
 
 def _median_rgb_at(img, x, y, radius=2):
     """Returns a small-patch median RGB while ignoring red debug grid pixels."""
@@ -60,7 +74,7 @@ def _rgb_to_hsv(rgb):
     h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
     return h * 360.0, s, v
 
-def _classify_x_plate_sample(rgb):
+def _classify_x_plate_sample(rgb, refs):
     """Classifies one x-mode plate sample into a level vote, or None to ignore."""
     if _is_debug_grid_pixel(rgb):
         return None
@@ -71,30 +85,25 @@ def _classify_x_plate_sample(rgb):
     if 32 <= hue <= 46 and sat <= 0.27 and val >= 0.80:
         return None
 
-    # White/gray dish pixels belong to x2. Other levels are saturated enough to
-    # be caught by the hue bands below.
-    if sat <= 0.12 and val >= 0.68:
-        return 1
-
-    # Dark browns are usually fish outlines or shadows. Orange x128 dish pixels
-    # are bright enough to survive this.
+    # Dark outlines/shadows should not vote.
     if val < 0.50:
         return None
 
-    if 50 <= hue <= 70 and sat >= 0.24 and val >= 0.55:
-        return 2
-    if 85 <= hue <= 125 and sat >= 0.16 and val >= 0.50:
-        return 3
-    if 135 <= hue <= 175 and sat >= 0.16 and val >= 0.50:
-        return 4
-    if 185 <= hue <= 215 and sat >= 0.12 and val >= 0.50:
-        return 5
-    if 275 <= hue <= 325 and sat >= 0.14 and val >= 0.55:
-        return 6
-    if 15 <= hue <= 32 and sat >= 0.45 and val >= 0.75:
-        return 7
+    # Find the nearest color level from refs (levels 1-11)
+    min_dist = float('inf')
+    closest_lvl = None
+    for lvl in range(1, 12):
+        if lvl in refs:
+            ref = refs[lvl]
+            dist = (rgb[0] - ref[0])**2 + (rgb[1] - ref[1])**2 + (rgb[2] - ref[2])**2
+            if dist < min_dist:
+                min_dist = dist
+                closest_lvl = lvl
 
-    return None
+    if min_dist > 2500:
+        return None
+
+    return closest_lvl
 
 def _nearest_color_level(rgb, color_map, include_empty=True):
     min_dist = float('inf')
@@ -109,10 +118,10 @@ def _nearest_color_level(rgb, color_map, include_empty=True):
     return closest_lvl, min_dist
 
 def _x_reference_colors(color_map):
-    # Preserve configured high-level colors, but use canonical visible dish
-    # colors for levels 0-7 so stale guessed config values do not break parsing.
-    refs = dict(color_map)
-    refs.update(X_CANONICAL_COLORS)
+    # Prefer calibrated/configured colors in color_map over canonical defaults
+    refs = dict(X_CANONICAL_COLORS)
+    for lvl, col in color_map.items():
+        refs[lvl] = col
     return refs
 
 def _classify_x_cell(rgb_img, cell_left_px, cell_top_px, cell_right_px, cell_bottom_px,
@@ -126,14 +135,18 @@ def _classify_x_cell(rgb_img, cell_left_px, cell_top_px, cell_right_px, cell_bot
     cell_w_px = cell_right_px - cell_left_px
     cell_h_px = cell_bottom_px - cell_top_px
     img_w, img_h = rgb_img.size
-    votes = {lvl: 0 for lvl in range(1, 8)}
+    
+    # Get active reference colors prioritizing color_map
+    refs = _x_reference_colors(color_map)
+
+    votes = {lvl: 0 for lvl in range(1, 12)}
     voted_samples = {}
 
     for fx, fy in X_PLATE_SAMPLE_POINTS:
         px = max(0, min(int(cell_left_px + fx * cell_w_px), img_w - 1))
         py = max(0, min(int(cell_top_px + fy * cell_h_px), img_h - 1))
         sampled_rgb = _median_rgb_at(rgb_img, px, py)
-        lvl = _classify_x_plate_sample(sampled_rgb)
+        lvl = _classify_x_plate_sample(sampled_rgb, refs)
         if lvl is None:
             continue
         votes[lvl] += 1
@@ -141,13 +154,12 @@ def _classify_x_cell(rgb_img, cell_left_px, cell_top_px, cell_right_px, cell_bot
 
     best_votes = max(votes.values())
     if best_votes > 0:
-        refs = _x_reference_colors(color_map)
         candidates = [lvl for lvl, count in votes.items() if count == best_votes]
         if len(candidates) == 1:
             closest_lvl = candidates[0]
         else:
             def avg_ref_distance(lvl):
-                ref = refs.get(lvl, X_CANONICAL_COLORS.get(lvl, (0, 0, 0)))
+                ref = refs.get(lvl, (0, 0, 0))
                 samples = voted_samples.get(lvl, [])
                 if not samples:
                     return float('inf')
@@ -161,7 +173,7 @@ def _classify_x_cell(rgb_img, cell_left_px, cell_top_px, cell_right_px, cell_bot
         if samples:
             sampled_rgb = tuple(sum(rgb[channel] for rgb in samples) // len(samples) for channel in range(3))
         else:
-            sampled_rgb = X_CANONICAL_COLORS.get(closest_lvl, (0, 0, 0))
+            sampled_rgb = refs.get(closest_lvl, (0, 0, 0))
         return closest_lvl, sampled_rgb, "PlateVotes", best_votes
 
     # Fallback for future/unseen dish colors: use the old lower-middle color
@@ -174,7 +186,6 @@ def _classify_x_cell(rgb_img, cell_left_px, cell_top_px, cell_right_px, cell_bot
             dish_pixels.append(_median_rgb_at(rgb_img, px, py))
 
     sampled_rgb = tuple(int(statistics.median(rgb[channel] for rgb in dish_pixels)) for channel in range(3))
-    refs = _x_reference_colors(color_map)
     closest_lvl, min_dist = _nearest_color_level(sampled_rgb, refs, include_empty=False)
     return closest_lvl, sampled_rgb, "ColorFallback", int(min_dist)
 
@@ -243,10 +254,71 @@ def _mask_similarity(mask_a, mask_b):
                 intersection += 1
     return intersection / union if union else 0.0
 
+_templates_deduplicated = False
+
+def deduplicate_templates(root):
+    if not os.path.isdir(root):
+        return
+    for dirname in os.listdir(root):
+        if not dirname.startswith("lvl_"):
+            continue
+        level_dir = os.path.join(root, dirname)
+        if not os.path.isdir(level_dir):
+            continue
+        # Get all png files
+        files = sorted([
+            os.path.join(level_dir, f)
+            for f in os.listdir(level_dir)
+            if f.lower().endswith(".png")
+        ])
+        
+        kept_templates = []
+        for p in files:
+            try:
+                mask = Image.open(p).convert("L").resize(X_TEMPLATE_SIZE, Image.Resampling.NEAREST)
+                data = mask.tobytes()
+            except Exception:
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+                continue
+                
+            if sum(1 for value in data if value > 0) < X_TEMPLATE_MIN_PIXELS:
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+                continue
+                
+            is_dup = False
+            for kept_data in kept_templates:
+                similarity = _mask_similarity(data, kept_data)
+                if similarity >= 0.95:
+                    is_dup = True
+                    break
+            
+            if is_dup:
+                try:
+                    os.remove(p)
+                    print(f"Deleted duplicate template: {p}")
+                except Exception as e:
+                    print(f"Error deleting duplicate template {p}: {e}")
+            else:
+                kept_templates.append(data)
+
 def _load_x_templates(cfg):
+    global _templates_deduplicated
     root = _template_dir(cfg)
     if not os.path.isdir(root):
         return {}
+
+    if not _templates_deduplicated:
+        try:
+            deduplicate_templates(root)
+        except Exception as e:
+            print(f"Error deduplicating templates: {e}")
+        _templates_deduplicated = True
 
     max_per_level = int(cfg.get('template_max_per_level', 40))
     templates = {}
@@ -309,7 +381,25 @@ def _save_x_template_sample(cell_img, lvl, root, timestamp, r, c):
     if mask is None:
         return False
 
+    mask_data = mask.tobytes()
+    active_pixel_count = sum(1 for value in mask_data if value > 0)
+    if active_pixel_count < X_TEMPLATE_MIN_PIXELS:
+        return False
+
     level_dir = os.path.join(root, f"lvl_{lvl}")
+    if os.path.exists(level_dir):
+        for filename in os.listdir(level_dir):
+            if filename.lower().endswith(".png"):
+                p = os.path.join(level_dir, filename)
+                try:
+                    existing_mask = Image.open(p).convert("L").resize(X_TEMPLATE_SIZE, Image.Resampling.NEAREST)
+                    existing_data = existing_mask.tobytes()
+                    similarity = _mask_similarity(mask_data, existing_data)
+                    if similarity >= 0.95:
+                        return False
+                except Exception:
+                    pass
+
     os.makedirs(level_dir, exist_ok=True)
     sample_path = os.path.join(level_dir, f"{timestamp}_{r}_{c}.png")
     mask.save(sample_path)

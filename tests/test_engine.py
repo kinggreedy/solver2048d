@@ -94,30 +94,39 @@ class TestEngine(unittest.TestCase):
 
     def test_7_spawn_distribution_probabilities(self):
         """Spawn distribution matches configured probabilities."""
-        board = 0
-        outcomes = game_engine.get_spawn_outcomes(board, 'x1')
-        
-        sum_prob_1_low = 0.0
-        sum_prob_2_low = 0.0
-        sum_prob_2_low_1_high = 0.0
-        
-        for prob, nb, score in outcomes:
-            grid = game_engine.board_to_list(nb)
-            spawned_levels = [lvl for row in grid for lvl in row if lvl > 0]
+        orig_probs = game_engine.config.get('spawn_probabilities', {}).copy()
+        try:
+            game_engine.config['spawn_probabilities'] = {
+                'event_1_low': 0.50,
+                'event_2_low': 0.35,
+                'event_2_low_1_high': 0.15
+            }
+            board = 0
+            outcomes = game_engine.get_spawn_outcomes(board, 'x1')
             
-            if len(spawned_levels) == 1:
-                self.assertEqual(spawned_levels[0], 1)
-                sum_prob_1_low += prob
-            elif len(spawned_levels) == 2:
-                self.assertEqual(spawned_levels, [1, 1])
-                sum_prob_2_low += prob
-            elif len(spawned_levels) == 3:
-                self.assertEqual(sorted(spawned_levels), [1, 1, 2])
-                sum_prob_2_low_1_high += prob
+            sum_prob_1_low = 0.0
+            sum_prob_2_low = 0.0
+            sum_prob_2_low_1_high = 0.0
+            
+            for prob, nb, score in outcomes:
+                grid = game_engine.board_to_list(nb)
+                spawned_levels = [lvl for row in grid for lvl in row if lvl > 0]
                 
-        self.assertAlmostEqual(sum_prob_1_low, 0.50, places=5)
-        self.assertAlmostEqual(sum_prob_2_low, 0.35, places=5)
-        self.assertAlmostEqual(sum_prob_2_low_1_high, 0.15, places=5)
+                if len(spawned_levels) == 1:
+                    self.assertEqual(spawned_levels[0], 1)
+                    sum_prob_1_low += prob
+                elif len(spawned_levels) == 2:
+                    self.assertEqual(spawned_levels, [1, 1])
+                    sum_prob_2_low += prob
+                elif len(spawned_levels) == 3:
+                    self.assertEqual(sorted(spawned_levels), [1, 1, 2])
+                    sum_prob_2_low_1_high += prob
+                    
+            self.assertAlmostEqual(sum_prob_1_low, 0.50, places=5)
+            self.assertAlmostEqual(sum_prob_2_low, 0.35, places=5)
+            self.assertAlmostEqual(sum_prob_2_low_1_high, 0.15, places=5)
+        finally:
+            game_engine.config['spawn_probabilities'] = orig_probs
 
 if __name__ == '__main__':
     unittest.main()

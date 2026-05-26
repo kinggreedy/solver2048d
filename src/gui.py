@@ -20,7 +20,7 @@ class CaptureSignalEmitter(QObject):
 from src import game_engine
 from src import solver
 from src import stats
-from src.paths import CONFIG_PATH, LATEST_SCREENSHOT_PATH, LOGS_DIR
+from src.paths import CONFIG_PATH, CAPTURE_CONFIG_PATH, LATEST_SCREENSHOT_PATH, LOGS_DIR
 
 class SolverThread(QThread):
     solver_finished = pyqtSignal(int)   # generation
@@ -170,6 +170,9 @@ class Solver2048dGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.config = game_engine.config
+        # Ensure capture config is loaded cleanly from capture_config.yaml
+        from src.image_parser import load_capture_config
+        self.config['capture'] = load_capture_config()
         
         # State variables
         self.current_board = 0
@@ -177,6 +180,7 @@ class Solver2048dGUI(QMainWindow):
         self.board_after_move_no_spawn = 0
         self.last_move_taken = None
         self.last_rec_move = None
+        self.capture_warning_cells = set()
         
         self.total_score = 0
         self.total_energy = 0
@@ -660,23 +664,25 @@ class Solver2048dGUI(QMainWindow):
         self.btn_capture_now = QPushButton("📸 Capture")
         self.btn_capture_now.setStyleSheet("background-color: #0d47a1; border-color: #1565c0; font-weight: bold; padding: 6px 10px;")
         self.btn_capture_now.clicked.connect(self.request_android_capture)
-        capture_settings_layout.addWidget(self.btn_capture_now, 2)
+        self.btn_capture_now.setMaximumWidth(100)
+        capture_settings_layout.addWidget(self.btn_capture_now, 1)
         
         # 2. Capture Mode
         self.cmb_capture_mode = QComboBox()
-        self.cmb_capture_mode.addItems(["🔢 Classic (Lv1,2...)", "✖️ Multiplier (x2,x4...)"])
+        self.cmb_capture_mode.addItems(["🔢 Lvl", "✖️ Mult"])
         self.cmb_capture_mode.setStyleSheet("background-color: #2a2a35; padding: 4px; border-radius: 4px; font-size: 12px; font-weight: bold; color: #ffffff;")
+        self.cmb_capture_mode.setMaximumWidth(100)
         cap_mode = self.config.get('capture', {}).get('mode', 'level')
         self.cmb_capture_mode.setCurrentIndex(1 if cap_mode == 'x' else 0)
         self.cmb_capture_mode.currentIndexChanged.connect(self.handle_capture_mode_changed)
-        capture_settings_layout.addWidget(self.cmb_capture_mode, 3)
+        capture_settings_layout.addWidget(self.cmb_capture_mode, 1)
 
         # 3. Status Label
         self.lbl_capture_status = QLabel("💤 Idle")
         self.lbl_capture_status.setStyleSheet("color: #b0bec5; font-weight: bold; font-size: 12px; background-color: #15151b; border-radius: 4px; padding: 6px;")
         self.lbl_capture_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         capture_settings_layout.addWidget(self.lbl_capture_status, 3)
-        
+
         capture_layout.addWidget(capture_settings_frame)
         
         # Live Preview Label
@@ -754,6 +760,11 @@ class Solver2048dGUI(QMainWindow):
         self.chk_template_matching.stateChanged.connect(self.handle_template_matching_changed)
         row1_layout.addWidget(self.chk_template_matching)
 
+        self.chk_auto_apply = QCheckBox("⚡ Auto Apply")
+        self.chk_auto_apply.setChecked(capture_cfg.get('auto_apply', False))
+        self.chk_auto_apply.stateChanged.connect(self.handle_auto_apply_changed)
+        row1_layout.addWidget(self.chk_auto_apply)
+
         row1_layout.addStretch()
 
         self.btn_save_cal = QPushButton("💾 Save Crop")
@@ -781,7 +792,7 @@ class Solver2048dGUI(QMainWindow):
         self.btn_calibrate_colors.setStyleSheet("padding: 4px 8px;")
         self.btn_calibrate_colors.setToolTip(
             "Sample dish colors from the current screenshot using the confirmed board as ground truth.\n"
-            "Reparse first, correct any wrong tiles manually, then click this to update colors_x in config.yaml."
+            "Reparse first, correct any wrong tiles manually, then click this to update colors_x in capture_config.yaml."
         )
         self.btn_calibrate_colors.clicked.connect(self.calibrate_colors_from_board)
         row2_layout.addWidget(self.btn_calibrate_colors)
@@ -820,10 +831,19 @@ class Solver2048dGUI(QMainWindow):
         if grid:
             board_int = game_engine.list_to_board(grid)
             self.save_history()
+            self.capture_warning_cells = self.find_capture_mismatch_cells(board_int)
             self.current_board = board_int
             
-            self.lbl_capture_status.setText("✅ Parsed")
-            self.statusBar().showMessage("Board updated from Android capture!", 4000)
+            if self.capture_warning_cells:
+                warning_count = len(self.capture_warning_cells)
+                self.lbl_capture_status.setText(f"⚠️ Parsed ({warning_count})")
+                self.statusBar().showMessage(
+                    f"Capture parsed with {warning_count} board mismatch warning(s). Click marked cells to clear.",
+                    5000
+                )
+            else:
+                self.lbl_capture_status.setText("✅ Parsed")
+                self.statusBar().showMessage("Board updated from Android capture!", 4000)
             
             # If waiting for spawn, auto-confirm and return to normal
             if self.gui_state == "WAITING_FOR_SPAWN":
@@ -866,6 +886,12 @@ class Solver2048dGUI(QMainWindow):
         if 'capture' not in self.config:
             self.config['capture'] = {}
         self.config['capture']['template_matching'] = self.chk_template_matching.isChecked()
+
+    def handle_auto_apply_changed(self):
+        """Fires when the Auto Apply checkbox is toggled."""
+        if 'capture' not in self.config:
+            self.config['capture'] = {}
+        self.config['capture']['auto_apply'] = self.chk_auto_apply.isChecked()
 
     def update_screenshot_display(self):
         """Draws the crop box and 4x4 grid overlay on the latest screenshot and scales it to fit."""
@@ -964,6 +990,7 @@ class Solver2048dGUI(QMainWindow):
         if grid:
             board_int = game_engine.list_to_board(grid)
             self.save_history()
+            self.capture_warning_cells = self.find_capture_mismatch_cells(board_int)
             self.current_board = board_int
             
             if self.gui_state == "WAITING_FOR_SPAWN":
@@ -972,19 +999,27 @@ class Solver2048dGUI(QMainWindow):
                 self.update_gui_state_display()
                 
             self.update_board_display()
-            self.lbl_capture_status.setText("✅ Parsed")
-            self.statusBar().showMessage("Board reparsed and updated successfully!", 3000)
+            if self.capture_warning_cells:
+                warning_count = len(self.capture_warning_cells)
+                self.lbl_capture_status.setText(f"⚠️ Parsed ({warning_count})")
+                self.statusBar().showMessage(
+                    f"Board reparsed with {warning_count} mismatch warning(s). Click marked cells to clear.",
+                    5000
+                )
+            else:
+                self.lbl_capture_status.setText("✅ Parsed")
+                self.statusBar().showMessage("Board reparsed and updated successfully!", 3000)
             self.run_solver()
         else:
             self.lbl_capture_status.setText("❌ Parse Failed")
             self.statusBar().showMessage("Reparsing failed! Adjust calibration and retry.", 3000)
 
     def save_crop_settings(self):
-        """Saves current crop parameters to config.yaml."""
-        config_path = CONFIG_PATH
+        """Saves current crop parameters to capture_config.yaml."""
         try:
             import yaml
-            with open(config_path, "r") as f:
+            path = CAPTURE_CONFIG_PATH
+            with open(path, "r") as f:
                 yaml_data = yaml.safe_load(f) or {}
                 
             if 'capture' not in yaml_data:
@@ -1002,10 +1037,13 @@ class Solver2048dGUI(QMainWindow):
             # Save the template matching setting
             yaml_data['capture']['template_matching'] = self.chk_template_matching.isChecked()
             
-            with open(config_path, "w") as f:
+            # Save the auto apply setting
+            yaml_data['capture']['auto_apply'] = self.chk_auto_apply.isChecked()
+            
+            with open(path, "w") as f:
                 yaml.safe_dump(yaml_data, f, default_flow_style=False)
                 
-            self.statusBar().showMessage("Crop settings saved to config.yaml successfully!", 3000)
+            self.statusBar().showMessage("Crop settings saved to capture_config.yaml successfully!", 3000)
         except Exception as e:
             self.statusBar().showMessage(f"Failed to save crop settings: {e}", 3000)
             
@@ -1088,8 +1126,9 @@ class Solver2048dGUI(QMainWindow):
             for lvl, samps in samples_per_level.items():
                 new_colors[lvl] = tuple(sum(s[k] for s in samps) // len(samps) for k in range(3))
 
-            # Load existing config, merge in new per-level colours, write back
-            with open(CONFIG_PATH, "r") as f:
+            # Load existing capture config, merge in new per-level colours, write back
+            path = CAPTURE_CONFIG_PATH
+            with open(path, "r") as f:
                 yaml_data = yaml.safe_load(f) or {}
 
             existing_colors = {}
@@ -1111,7 +1150,7 @@ class Solver2048dGUI(QMainWindow):
                 yaml_data['capture'] = {}
             yaml_data['capture']['colors_x'] = merged_yaml
 
-            with open(CONFIG_PATH, "w") as f:
+            with open(path, "w") as f:
                 yaml.safe_dump(yaml_data, f, default_flow_style=False)
 
             # Also update runtime config so next parse uses new colours immediately
@@ -1139,7 +1178,7 @@ class Solver2048dGUI(QMainWindow):
             print(summary)
             QMessageBox.information(self, "Color Calibration Done", summary)
             self.statusBar().showMessage(
-                f"Colors calibrated for {len(new_colors)} level(s) and saved to config.yaml!", 4000
+                f"Colors calibrated for {len(new_colors)} level(s) and saved to capture_config.yaml!", 4000
             )
 
         except Exception as e:
@@ -1261,7 +1300,7 @@ class Solver2048dGUI(QMainWindow):
         else:
             super().keyPressEvent(event)
             
-    def get_tile_style(self, level):
+    def get_tile_style(self, level, capture_warning=False):
         colors = {
             0: ("#2e2e38", "#ffffff"), # empty
             1: ("#4facfe", "#ffffff"), # x1 spawn low
@@ -1286,6 +1325,9 @@ class Solver2048dGUI(QMainWindow):
         if self.gui_state == "WAITING_FOR_SPAWN" and level == 0:
             border = "2px dashed #0d47a1"
             bg = "#1b1b22"
+
+        if capture_warning:
+            border = "3px solid #ffeb3b"
             
         return f"""
             QPushButton {{
@@ -1334,6 +1376,7 @@ class Solver2048dGUI(QMainWindow):
             self.board_after_move_no_spawn,
             self.last_move_taken
         ) = self.history.pop()
+        self.capture_warning_cells.clear()
         
         self.update_board_display()
         self.update_stats_display()
@@ -1345,6 +1388,7 @@ class Solver2048dGUI(QMainWindow):
     def reset_board(self):
         self.save_history()
         self.current_board = 0
+        self.capture_warning_cells.clear()
         self.gui_state = "NORMAL"
         self.update_board_display()
         self.update_gui_state_display()
@@ -1375,6 +1419,7 @@ class Solver2048dGUI(QMainWindow):
         self.total_energy = 0
         self.total_moves = 0
         self.gui_state = "NORMAL"
+        self.capture_warning_cells.clear()
         
         self.update_board_display()
         self.update_stats_display()
@@ -1385,6 +1430,7 @@ class Solver2048dGUI(QMainWindow):
         
     def set_board_cell(self, r, c, val):
         self.save_history()
+        self.capture_warning_cells.discard((r, c))
         self.current_board = game_engine.set_cell(self.current_board, r, c, val)
         self.update_board_display()
         
@@ -1425,6 +1471,7 @@ class Solver2048dGUI(QMainWindow):
             return
             
         self.save_history()
+        self.capture_warning_cells.clear()
         
         mode = self.mode_selector.currentData()
         energy_cost = self.config['modes'][mode]['energy_cost']
@@ -1584,6 +1631,26 @@ class Solver2048dGUI(QMainWindow):
             self.btn_move_down.setStyleSheet(style)
             self.btn_move_right.setStyleSheet(style)
             self.btn_apply_rec.setStyleSheet("background-color: #00796b; border-color: #00897b; color: white;")
+
+    def find_capture_mismatch_cells(self, parsed_board):
+        """Returns cells where a capture disagrees with the expected post-move board."""
+        if self.gui_state != "WAITING_FOR_SPAWN":
+            return set()
+
+        expected_grid = game_engine.board_to_list(self.board_after_move_no_spawn)
+        parsed_grid = game_engine.board_to_list(parsed_board)
+        warning_cells = set()
+
+        for r in range(4):
+            for c in range(4):
+                expected = expected_grid[r][c]
+                parsed = parsed_grid[r][c]
+                if expected == 0:
+                    continue  # new spawned tiles are allowed to emerge from empty cells
+                if parsed != expected:
+                    warning_cells.add((r, c))
+
+        return warning_cells
         
     def update_board_display(self):
         grid = game_engine.board_to_list(self.current_board)
@@ -1593,22 +1660,28 @@ class Solver2048dGUI(QMainWindow):
             for c in range(4):
                 level = grid[r][c]
                 btn = self.buttons[r][c]
+                has_capture_warning = (r, c) in self.capture_warning_cells
                 
                 # Set text based on level and capture mode
                 if level == 0:
-                    btn.setText("")
+                    display_text = ""
                 elif level == 11:
-                    btn.setText("🪨")
+                    display_text = "🪨"
                 else:
                     if mode == 'x':
                         # In X mode, display the actual tile value (2, 4, 8...)
-                        btn.setText(str(2 ** level))
+                        display_text = str(2 ** level)
                     else:
                         # In Level mode, display the raw level (1, 2, 3...)
-                        btn.setText(str(level))
+                        display_text = str(level)
+
+                if has_capture_warning:
+                    display_text = f"{display_text} ⚠️" if display_text else "⚠️"
+
+                btn.setText(display_text)
                     
                 # Set stylesheet
-                btn.setStyleSheet(self.get_tile_style(level))
+                btn.setStyleSheet(self.get_tile_style(level, has_capture_warning))
                 
     def update_stats_display(self):
         self.score_val_label.setText(f"Score: {self.total_score}")
@@ -1822,6 +1895,14 @@ class Solver2048dGUI(QMainWindow):
             
         elapsed_ms = (time.time() - self.solver_start_time) * 1000
         self._display_solver_result(evaluation, elapsed_ms, self.selected_mode, is_partial=False)
+
+        # Auto Apply Recommended Move if checked, no mismatches, and recommended move exists
+        if getattr(self, 'chk_auto_apply', None) and self.chk_auto_apply.isChecked():
+            if self.capture_warning_cells:
+                self.statusBar().showMessage("⚠️ Auto Apply stopped: parser mismatch warning detected.", 5000)
+                return
+            if getattr(self, 'last_rec_move', None) is not None:
+                self.execute_recommended_move()
 
     def aggregate_and_build_eval(self):
         """
