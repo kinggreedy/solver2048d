@@ -537,22 +537,28 @@ def get_best_move(board, mode_name, config, spawn_patterns=None, override_depth=
             
     # Fallback if even depth 1 wasn't completed (should be impossible, but as a safety)
     if completed_depth == 0:
+        if cancel_token and cancel_token.is_cancelled():
+            return None, 0.0, 0.0, {}, {}, 0, stats['nodes']
+            
         completed_depth = 1
         for move in valid_moves:
             next_board, move_score, _ = apply_move(board, move)
-            score, real, empty = expectimax_search(
-                next_board, 0, False, mode_name, memo, 
-                start_time, None, config, spawn_patterns, stats, False, cancel_token
-            )
-            val = move_score + score
-            real_val = move_score + real
-            move_values[move] = val
-            move_real_values[move] = real_val
-            if val > best_score:
-                best_score = val
-                best_real = real_val
-                best_empty = empty
-                best_move = move
+            try:
+                score, real, empty = expectimax_search(
+                    next_board, 0, False, mode_name, memo, 
+                    start_time, None, config, spawn_patterns, stats, False, cancel_token
+                )
+                val = move_score + score
+                real_val = move_score + real
+                move_values[move] = val
+                move_real_values[move] = real_val
+                if val > best_score:
+                    best_score = val
+                    best_real = real_val
+                    best_empty = empty
+                    best_move = move
+            except TimeoutError:
+                break
                 
     return best_move, best_real, best_empty, move_values, move_real_values, completed_depth, stats['nodes']
 
