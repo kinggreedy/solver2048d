@@ -31,6 +31,15 @@ class TestImageParser(unittest.TestCase):
                     [0, 0, 2, 1],
                     [1, 0, 2, 1]
                 ]
+            },
+            {
+                "name": "sample3.png",
+                "ground_truth": [
+                    [2, 0, 3, 7],
+                    [0, 1, 3, 4],
+                    [0, 0, 1, 3],
+                    [0, 0, 0, 0]
+                ]
             }
             # Add more samples here:
             # { "name": "sample2.png", "ground_truth": [...] }
