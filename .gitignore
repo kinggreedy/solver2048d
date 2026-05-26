@@ -15,5 +15,6 @@ temp_test_screenshot.png
 # System files
 .DS_Store
 
-# Exclude local agent/worker planning files from Git commits
+# Exclude local agent/worker planning files from Git commits, patch.diff is for communication between worker - planner
 .agent/
+patch.diff

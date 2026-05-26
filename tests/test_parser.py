@@ -60,6 +60,7 @@ class TestImageParser(unittest.TestCase):
     def test_all_samples(self):
         tests_dir = os.path.dirname(__file__)
         results = []
+        failed_samples = []
         
         print("\n" + "="*50)
         print("IMAGE PARSER VALIDATION REPORT")
@@ -70,11 +71,12 @@ class TestImageParser(unittest.TestCase):
             if not os.path.exists(img_path):
                 print(f"\n❌ {sample['name']}: file not found!")
                 results.append(False)
+                failed_samples.append(f"{sample['name']}: file not found")
                 continue
 
             # Mock crop settings for the test board
-            img = Image.open(img_path)
-            w, h = img.size
+            with Image.open(img_path) as img:
+                w, h = img.size
             orig_crop = self.config['capture'].copy()
             
             try:
@@ -86,6 +88,7 @@ class TestImageParser(unittest.TestCase):
                 # Mock mode if specified in test case
                 if "mode" in sample:
                     self.config['capture']['mode'] = sample["mode"]
+                self.config['capture']['template_matching'] = sample.get("template_matching", False)
                 
                 import time
                 start_time = time.perf_counter()
@@ -97,11 +100,15 @@ class TestImageParser(unittest.TestCase):
                 
                 board_match = True
                 mismatches = []
-                for r in range(4):
-                    for c in range(4):
-                        if parsed_grid[r][c] != gt[r][c]:
-                            board_match = False
-                            mismatches.append(f"({r},{c}): expected {gt[r][c]}, got {parsed_grid[r][c]}")
+                if parsed_grid is None:
+                    board_match = False
+                    mismatches.append("parser returned None")
+                else:
+                    for r in range(4):
+                        for c in range(4):
+                            if parsed_grid[r][c] != gt[r][c]:
+                                board_match = False
+                                mismatches.append(f"({r},{c}): expected {gt[r][c]}, got {parsed_grid[r][c]}")
 
                 if board_match:
                     print(f"\n✅ {sample['name']}: perfect match! ({elapsed_ms:.1f} ms)")
@@ -111,6 +118,7 @@ class TestImageParser(unittest.TestCase):
                     for m in mismatches:
                         print(f"   - {m}")
                     results.append(False)
+                    failed_samples.append(f"{sample['name']}: " + "; ".join(mismatches))
                     
             finally:
                 self.config['capture'] = orig_crop
@@ -120,6 +128,7 @@ class TestImageParser(unittest.TestCase):
         total = len(results)
         print(f"SUMMARY: {passed}/{total} boards passed.")
         print("="*50 + "\n")
+        self.assertEqual(passed, total, "\n".join(failed_samples))
 
 if __name__ == "__main__":
     unittest.main()

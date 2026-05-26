@@ -749,10 +749,10 @@ class Solver2048dGUI(QMainWindow):
         self.chk_show_grid.stateChanged.connect(self.update_screenshot_display)
         row1_layout.addWidget(self.chk_show_grid)
 
-        self.chk_collect_ocr = QCheckBox("Collect OCR Data")
-        self.chk_collect_ocr.setChecked(capture_cfg.get('collect_ocr', False))
-        self.chk_collect_ocr.stateChanged.connect(self.handle_ocr_collect_changed)
-        row1_layout.addWidget(self.chk_collect_ocr)
+        self.chk_template_matching = QCheckBox("Template Matching")
+        self.chk_template_matching.setChecked(capture_cfg.get('template_matching', False))
+        self.chk_template_matching.stateChanged.connect(self.handle_template_matching_changed)
+        row1_layout.addWidget(self.chk_template_matching)
 
         row1_layout.addStretch()
 
@@ -861,11 +861,11 @@ class Solver2048dGUI(QMainWindow):
         if getattr(self, 'latest_screenshot_path', None) and os.path.exists(self.latest_screenshot_path):
             self.reparse_current_screenshot()
 
-    def handle_ocr_collect_changed(self):
-        """Fires when the Collect OCR Data checkbox is toggled."""
+    def handle_template_matching_changed(self):
+        """Fires when the Template Matching checkbox is toggled."""
         if 'capture' not in self.config:
             self.config['capture'] = {}
-        self.config['capture']['collect_ocr'] = self.chk_collect_ocr.isChecked()
+        self.config['capture']['template_matching'] = self.chk_template_matching.isChecked()
 
     def update_screenshot_display(self):
         """Draws the crop box and 4x4 grid overlay on the latest screenshot and scales it to fit."""
@@ -999,8 +999,8 @@ class Solver2048dGUI(QMainWindow):
             index = self.cmb_capture_mode.currentIndex()
             yaml_data['capture']['mode'] = 'x' if index == 1 else 'level'
             
-            # Save the OCR collection setting
-            yaml_data['capture']['collect_ocr'] = self.chk_collect_ocr.isChecked()
+            # Save the template matching setting
+            yaml_data['capture']['template_matching'] = self.chk_template_matching.isChecked()
             
             with open(config_path, "w") as f:
                 yaml.safe_dump(yaml_data, f, default_flow_style=False)
@@ -1037,6 +1037,7 @@ class Solver2048dGUI(QMainWindow):
             from PIL import Image
             import yaml
             from src import game_engine as ge
+            from src import image_parser
 
             cfg = self.config.get('capture', {})
             mode = cfg.get('mode', 'level')
@@ -1116,6 +1117,14 @@ class Solver2048dGUI(QMainWindow):
             # Also update runtime config so next parse uses new colours immediately
             self.config.setdefault('capture', {})['colors_x'] = {int(k): list(v) for k, v in merged.items()}
 
+            template_samples_saved = 0
+            if cfg.get('template_matching', False):
+                template_samples_saved = image_parser.collect_x_template_samples(
+                    self.latest_screenshot_path,
+                    ge.board_to_list(self.current_board),
+                    cfg,
+                )
+
             # Build summary message
             lv_names = {0:'0',1:'x2',2:'x4',3:'x8',4:'x16',5:'x32',6:'x64',7:'x128',
                         8:'x256',9:'x512',10:'x1024',11:'stone'}
@@ -1124,6 +1133,8 @@ class Solver2048dGUI(QMainWindow):
                 r, g, b = new_colors[lvl]
                 n_samps = len(samples_per_level[lvl])
                 lines.append(f"  {lv_names.get(lvl, f'lvl{lvl}'):6s}: RGB=({r},{g},{b})  [{n_samps} sample(s)]")
+            if template_samples_saved:
+                lines.append(f"Collected {template_samples_saved} template sample(s) from the confirmed board.")
             summary = "\n".join(lines)
             print(summary)
             QMessageBox.information(self, "Color Calibration Done", summary)
