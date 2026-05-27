@@ -90,10 +90,15 @@ def capture_upload():
         # Parse board image (not blocking lock)
         import src.image_parser as image_parser
         grid = image_parser.parse_screenshot(save_path)
-        board_int = None
-        if grid:
-            from src import game_engine
-            board_int = game_engine.list_to_board(grid)
+        if not grid:
+            return jsonify({
+                "status": "error",
+                "message": "Image parsing failed (parse_screenshot returned None). Possible corrupt or truncated image.",
+                "retry": True
+            }), 400
+            
+        from src import game_engine
+        board_int = game_engine.list_to_board(grid)
             
         with state_lock:
             latest_screenshot_path = save_path
@@ -108,8 +113,14 @@ def capture_upload():
             "parsed_board": grid
         })
     except Exception as e:
-        print(f"Error handling uploaded capture: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        import traceback
+        tb = traceback.format_exc()
+        print(f"Error handling uploaded capture: {e}\n{tb}")
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {e}",
+            "retry": True
+        }), 500
 
 @app.route('/capture/latest', methods=['GET'])
 def capture_latest():

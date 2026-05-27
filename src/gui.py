@@ -204,7 +204,7 @@ class Solver2048dGUI(QMainWindow):
         self.latest_screenshot_path = None
         self.capture_emitter = CaptureSignalEmitter()
         self.capture_emitter.capture_received.connect(self.handle_incoming_capture)
-        self.capture_emitter.status_changed.connect(self.lbl_capture_status.setText)
+        self.capture_emitter.status_changed.connect(self.update_status_label)
         
         capture_cfg = self.config.get('capture', {})
         if capture_cfg.get('enabled', True):
@@ -818,13 +818,40 @@ class Solver2048dGUI(QMainWindow):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setFocus()
 
+    def update_status_label(self, text):
+        """Updates the status label text and dynamically adjusts its stylesheet colors."""
+        self.lbl_capture_status.setText(text)
+        
+        # Determine background and text colors based on status content
+        if "🛑" in text or "❌" in text or "Failed" in text:
+            # Red background for mismatch/errors/failures
+            bg_color = "#b71c1c"
+            fg_color = "#ffffff"
+        elif "✅" in text:
+            # Green background for successful parse
+            bg_color = "#1b5e20"
+            fg_color = "#ffffff"
+        elif "⚙️" in text or "⏳" in text or "⚡" in text:
+            # Orange background for active operations (parsing, waiting, swiping)
+            bg_color = "#e65100"
+            fg_color = "#ffffff"
+        else:
+            # Default dark background for idle/passive states
+            bg_color = "#15151b"
+            fg_color = "#b0bec5"
+            
+        self.lbl_capture_status.setStyleSheet(
+            f"color: {fg_color}; font-weight: bold; font-size: 12px; "
+            f"background-color: {bg_color}; border-radius: 4px; padding: 6px;"
+        )
+
     def request_android_capture(self):
         """Signals the background Flask server that a capture is requested."""
         if hasattr(self, 'chk_auto_apply'):
             self.chk_auto_apply.setChecked(False)
         import src.capture_server as capture_server
         capture_server.set_capture_requested(True)
-        self.lbl_capture_status.setText("⏳ Waiting for Android...")
+        self.update_status_label("⏳ Waiting for Android...")
         self.statusBar().showMessage("Android capture request sent to server.", 2000)
 
     def handle_incoming_capture(self, filepath, grid):
@@ -840,13 +867,13 @@ class Solver2048dGUI(QMainWindow):
             
             if self.capture_warning_cells:
                 warning_count = len(self.capture_warning_cells)
-                self.lbl_capture_status.setText(f"⚠️ Parsed ({warning_count})")
+                self.update_status_label(f"🛑 Parsed ({warning_count})")
                 self.statusBar().showMessage(
                     f"Capture parsed with {warning_count} board mismatch warning(s). Click marked cells to clear.",
                     5000
                 )
             else:
-                self.lbl_capture_status.setText("✅ Parsed")
+                self.update_status_label("✅ Parsed")
                 self.statusBar().showMessage("Board updated from Android capture!", 4000)
             
             # If waiting for spawn, auto-confirm and return to normal
@@ -856,7 +883,7 @@ class Solver2048dGUI(QMainWindow):
                 self.update_board_display()
                 self.run_solver()
         else:
-            self.lbl_capture_status.setText("❌ Parse Failed")
+            self.update_status_label("❌ Parse Failed")
             self.statusBar().showMessage("Capture received, but board parsing failed! Check crop calibration.", 4000)
 
     def handle_calibration_changed(self):
@@ -1041,7 +1068,7 @@ class Solver2048dGUI(QMainWindow):
             self.statusBar().showMessage("No screenshot available to reparse!", 2000)
             return
             
-        self.lbl_capture_status.setText("⚙️ Parsing...")
+        self.update_status_label("⚙️ Parsing...")
         
         import src.image_parser as image_parser
         grid = image_parser.parse_screenshot(self.latest_screenshot_path)
@@ -1059,17 +1086,17 @@ class Solver2048dGUI(QMainWindow):
             self.update_board_display()
             if self.capture_warning_cells:
                 warning_count = len(self.capture_warning_cells)
-                self.lbl_capture_status.setText(f"⚠️ Parsed ({warning_count})")
+                self.update_status_label(f"🛑 Parsed ({warning_count})")
                 self.statusBar().showMessage(
                     f"Board reparsed with {warning_count} mismatch warning(s). Click marked cells to clear.",
                     5000
                 )
             else:
-                self.lbl_capture_status.setText("✅ Parsed")
+                self.update_status_label("✅ Parsed")
                 self.statusBar().showMessage("Board reparsed and updated successfully!", 3000)
             self.run_solver()
         else:
-            self.lbl_capture_status.setText("❌ Parse Failed")
+            self.update_status_label("❌ Parse Failed")
             self.statusBar().showMessage("Reparsing failed! Adjust calibration and retry.", 3000)
 
     def save_crop_settings(self):
@@ -1609,7 +1636,7 @@ class Solver2048dGUI(QMainWindow):
                 swipe_coords = coords_map.get(move_const)
                 
                 capture_server.set_action_requested(dir_str, swipe_coords)
-                self.lbl_capture_status.setText(f"⚡ Swiping {dir_str}...")
+                self.update_status_label(f"⚡ Swiping {dir_str}...")
         else:
             self.statusBar().showMessage("No recommended move to apply!", 2000)
         
@@ -1789,15 +1816,9 @@ class Solver2048dGUI(QMainWindow):
             """)
             self.btn_confirm_spawn.setEnabled(True)
             
-            # Clear previous recommendation display to show we are waiting for spawn input
+            # Clear previous recommendation label but keep EV, EV Per Energy and Survival score visible
             if hasattr(self, 'rec_dir_label'):
                 self.rec_dir_label.setText("Waiting for spawn input... 🕒")
-            if hasattr(self, 'val_ev'):
-                self.val_ev.setText("-")
-            if hasattr(self, 'val_ev_energy'):
-                self.val_ev_energy.setText("-")
-            if hasattr(self, 'val_survival'):
-                self.val_survival.setValue(0)
             if hasattr(self, 'decision_badge'):
                 self.decision_badge.setText("WAITING FOR SPAWN")
                 self.decision_badge.setStyleSheet("background-color: #0d47a1; color: white; padding: 5px 15px; border-radius: 12px; font-weight: bold;")

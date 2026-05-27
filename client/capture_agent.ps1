@@ -84,7 +84,54 @@ if (-not $resolvedCurl) {
 $curlPath = $resolvedCurl
 
 $lastErrorTime = [DateTime]::MinValue
-$lastSeenActionSeq = -1
+$lastSeenActionSeq = $null
+
+function Upload-Screenshot {
+    param (
+        [string]$filePath,
+        [string]$url
+    )
+    
+    $maxRetries = 3
+    $attempt = 1
+    $uploaded = $false
+    
+    while ($attempt -le $maxRetries -and -not $uploaded) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Uploading $(Split-Path -Leaf $filePath) (attempt $attempt/$maxRetries)..."
+        $responseStr = & $curlPath -s -F "file=@$filePath" $url
+        
+        $success = $false
+        if ($LASTEXITCODE -eq 0 -and $responseStr) {
+            try {
+                $resObj = $responseStr | ConvertFrom-Json
+                if ($resObj.status -eq "success") {
+                    $uploaded = $true
+                    $success = $true
+                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Upload completed successfully."
+                } elseif ($resObj.retry) {
+                    Write-Warning "Server requested retry: $($resObj.message)"
+                } else {
+                    Write-Warning "Server returned upload error: $($resObj.message)"
+                }
+            } catch {
+                Write-Warning "Failed to parse server upload response: $_"
+            }
+        } else {
+            Write-Warning "curl execution failed with exit code $LASTEXITCODE"
+        }
+        
+        if (-not $success) {
+            if ($attempt -lt $maxRetries) {
+                $delay = 300
+                Write-Host "Waiting $delay ms before retrying..."
+                Start-Sleep -Milliseconds $delay
+            }
+            $attempt++
+        }
+    }
+    
+    return $uploaded
+}
 
 Write-Host "=== Windows Capture Agent Running ==="
 Write-Host "Target Server: $server"
@@ -100,6 +147,11 @@ while ($true) {
     try {
         # Poll the server to check if a screenshot or swipe action is requested
         $response = Invoke-RestMethod -Uri "$server/capture/poll" -Method Get -TimeoutSec 3
+
+        if ($null -eq $lastSeenActionSeq) {
+            $lastSeenActionSeq = $response.action_seq
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Startup sync: Synchronized lastSeenActionSeq to $lastSeenActionSeq." -ForegroundColor Yellow
+        }
 
         if ($response.action_requested -and $response.action_seq -ne $lastSeenActionSeq) {
             $action = $response.action_requested
@@ -131,12 +183,9 @@ while ($true) {
             cmd /c $cmd
 
             if ($LASTEXITCODE -eq 0 -and (Test-Path $screenshotFile)) {
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Uploading post-action screenshot to server..."
-
-                # Upload PNG with metadata parameters for tracking/debugging
+                # Upload PNG with metadata parameters for tracking/debugging and handle retries/errors
                 $uploadUrl = "$server/capture/upload?source=post_action&action=$action&action_seq=$actionSeq"
-                & $curlPath -s -F "file=@$screenshotFile" $uploadUrl
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Post-action screenshot uploaded successfully."
+                $uploaded = Upload-Screenshot -filePath $screenshotFile -url $uploadUrl
             } else {
                 Write-Warning "Post-action screencap failed. Check ADB connection."
             }
@@ -149,12 +198,9 @@ while ($true) {
             cmd /c $cmd
 
             if ($LASTEXITCODE -eq 0 -and (Test-Path $screenshotFile)) {
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Uploading latest.png to server..."
-
-                # Upload PNG using curl.exe with source parameter
+                # Upload PNG using helper function with retry logic
                 $uploadUrl = "$server/capture/upload?source=manual"
-                & $curlPath -s -F "file=@$screenshotFile" $uploadUrl
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Screenshot uploaded successfully."
+                $uploaded = Upload-Screenshot -filePath $screenshotFile -url $uploadUrl
             } else {
                 Write-Warning "adb command failed or latest.png was not created. Is your Android device connected via ADB?"
             }
