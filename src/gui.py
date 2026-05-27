@@ -550,6 +550,15 @@ class Solver2048dGUI(QMainWindow):
         self.depth_selector.addItem("Depth 5 (Deep)", 5)
         self.depth_selector.addItem("Depth 6 (Thorough)", 6)
         self.depth_selector.addItem("Depth 7 (Ultimate)", 7)
+        
+        # Load default search depth from config, default to 5 (Deep)
+        cfg_depth = self.config.get('solver', {}).get('expectimax_depth', 5)
+        depth_idx = 4  # fallback default
+        for idx in range(self.depth_selector.count()):
+            if self.depth_selector.itemData(idx) == cfg_depth:
+                depth_idx = idx
+                break
+        self.depth_selector.setCurrentIndex(depth_idx)
         self.depth_selector.currentIndexChanged.connect(self.run_solver)
         settings_layout.addWidget(self.depth_selector, 1, 1)
 
@@ -561,7 +570,15 @@ class Solver2048dGUI(QMainWindow):
         self.time_selector.addItem("5000 ms", 5000)
         self.time_selector.addItem("10000 ms", 10000)
         self.time_selector.addItem("Unlimited", 0)
-        self.time_selector.setCurrentIndex(1) # Default to 1000 ms
+        
+        # Load default max time from config, default to 0 (Unlimited)
+        cfg_time = self.config.get('solver', {}).get('max_time_ms', 0)
+        time_idx = 5  # fallback default
+        for idx in range(self.time_selector.count()):
+            if self.time_selector.itemData(idx) == cfg_time:
+                time_idx = idx
+                break
+        self.time_selector.setCurrentIndex(time_idx)
         self.time_selector.currentIndexChanged.connect(self.run_solver)
         settings_layout.addWidget(self.time_selector, 1, 3)
 

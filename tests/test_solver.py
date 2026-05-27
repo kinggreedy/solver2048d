@@ -10,6 +10,9 @@ class TestSolver(unittest.TestCase):
         self.orig_max_time = self.config['solver'].get('max_time_ms')
         self.config['solver']['max_time_ms'] = 0
         
+        self.orig_depth = self.config['solver'].get('expectimax_depth')
+        self.config['solver']['expectimax_depth'] = 3
+        
         # Override spawn probabilities for deterministic simulations
         self.orig_spawn_probs = self.config.get('spawn_probabilities', {}).copy()
         self.config['spawn_probabilities'] = {
@@ -24,6 +27,11 @@ class TestSolver(unittest.TestCase):
                 self.config['solver']['max_time_ms'] = self.orig_max_time
             elif 'max_time_ms' in self.config['solver']:
                 del self.config['solver']['max_time_ms']
+        if hasattr(self, 'orig_depth'):
+            if self.orig_depth is not None:
+                self.config['solver']['expectimax_depth'] = self.orig_depth
+            elif 'expectimax_depth' in self.config['solver']:
+                del self.config['solver']['expectimax_depth']
         if hasattr(self, 'orig_spawn_probs'):
             self.config['spawn_probabilities'] = self.orig_spawn_probs
 

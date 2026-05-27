@@ -61,8 +61,8 @@ modes:
     high_spawn: 5
     low_spawn: 4
 solver:
-  expectimax_depth: 3
-  max_time_ms: 1000
+  expectimax_depth: 5
+  max_time_ms: 0
   mc_depth: 8
   mc_rollouts: 100
   risk_aversion: 2.0
