@@ -188,6 +188,10 @@ class Solver2048dGUI(QMainWindow):
         
         # Game loop states: "NORMAL", "WAITING_FOR_SPAWN"
         self.gui_state = "NORMAL"
+        self.enabled_modes = []
+        self.selected_mode = None
+        self.current_search_results = {}
+        self.completed_modes = set()
         
         # Undo history: holds tuples of (board, score, energy, moves, state)
         self.history = []
@@ -861,6 +865,48 @@ class Solver2048dGUI(QMainWindow):
         
         if grid:
             board_int = game_engine.list_to_board(grid)
+            
+            # Post-swipe validation: check if the board didn't change at all
+            if self.gui_state == "WAITING_FOR_SPAWN" and board_int == self.board_before_move:
+                if hasattr(self, 'chk_auto_apply') and self.chk_auto_apply.isChecked():
+                    if getattr(self, 'last_move_taken', None) is not None:
+                        move_const = self.last_move_taken
+                        dir_str = {
+                            game_engine.LEFT: "LEFT",
+                            game_engine.UP: "UP",
+                            game_engine.RIGHT: "RIGHT",
+                            game_engine.DOWN: "DOWN"
+                        }.get(move_const)
+                        
+                        if dir_str:
+                            import src.capture_server as capture_server
+                            crop_x = self.spn_crop_x.value()
+                            crop_y = self.spn_crop_y.value()
+                            crop_w = self.spn_crop_w.value()
+                            crop_h = self.spn_crop_h.value()
+                            
+                            cx = int(crop_x + crop_w / 2)
+                            cy = int(crop_y + crop_h / 2)
+                            x_offset = int(crop_w * 0.3)
+                            y_offset = int(crop_h * 0.3)
+                            
+                            coords_map = {
+                                game_engine.LEFT:  [cx + x_offset, cy, cx - x_offset, cy, 120],
+                                game_engine.RIGHT: [cx - x_offset, cy, cx + x_offset, cy, 120],
+                                game_engine.UP:    [cx, cy + y_offset, cx, cy - y_offset, 120],
+                                game_engine.DOWN:  [cx, cy - y_offset, cx, cy + y_offset, 120]
+                            }
+                            swipe_coords = coords_map.get(move_const)
+                            
+                            capture_server.set_action_requested(dir_str, swipe_coords)
+                            self.update_status_label(f"⚡ Retrying {dir_str}...")
+                            self.statusBar().showMessage(f"Swipe failed to register. Retrying {dir_str}...", 3000)
+                            return
+                # If Auto Apply is not enabled, update status and alert user
+                self.update_status_label("🛑 Swipe Failed")
+                self.statusBar().showMessage("Swipe failed to register. Verify ADB connection and retry.", 5000)
+                return
+            
             self.save_history()
             self.capture_warning_cells = self.find_capture_mismatch_cells(board_int)
             self.current_board = board_int
@@ -2178,6 +2224,7 @@ class Solver2048dGUI(QMainWindow):
             ev_per_energy = mode_results['ev_per_energy']
             move_values = mode_results['move_values']           # heuristic ranking scores
             move_real_values = mode_results.get('move_real_values', {})  # real expected pts
+            decision = evaluation.get('decision', 'UNKNOWN')
             
             # Decide label prefix and badge style based on partial vs final
             completed_depth = evaluation.get('completed_depth', 0)
@@ -2197,34 +2244,39 @@ class Solver2048dGUI(QMainWindow):
                 rec_text += f"  (👉 Switch to {best_overall_mode.upper()}!)"
 
             # Update direction label
-            self.rec_dir_label.setText(rec_text)
+            if self.gui_state == "WAITING_FOR_SPAWN":
+                self.rec_dir_label.setText("Waiting for spawn input... 🕒")
+                self.decision_badge.setText("WAITING FOR SPAWN")
+                self.decision_badge.setStyleSheet("background-color: #0d47a1; color: white; padding: 5px 15px; border-radius: 12px; font-weight: bold;")
+            else:
+                self.rec_dir_label.setText(rec_text)
+                
+                # Decision Badge
+                badge_text = badge_prefix + decision.replace("_", " ")
+                if "RESTART" in decision or "CONVERT" in decision:
+                    badge_text += " (EXPERIMENTAL)"
+                self.decision_badge.setText(badge_text)
+                
+                if is_partial:
+                    # Amber pulsing style for in-progress
+                    self.decision_badge.setStyleSheet(
+                        "background-color: #e65100; color: white; padding: 5px 15px; border-radius: 12px; font-weight: bold;"
+                    )
+                elif decision == "CONTINUE":
+                    self.decision_badge.setStyleSheet("background-color: #2e7d32; color: white; padding: 5px 15px; border-radius: 12px; font-weight: bold;")
+                elif decision == "RESTART_GAME":
+                    self.decision_badge.setStyleSheet("background-color: #ef6c00; color: white; padding: 5px 15px; border-radius: 12px; font-weight: bold;")
+                elif decision == "STOP_AND_CONVERT":
+                    self.decision_badge.setStyleSheet("background-color: #c62828; color: white; padding: 5px 15px; border-radius: 12px; font-weight: bold;")
+                else:
+                    self.decision_badge.setStyleSheet("background-color: #424242; color: white; padding: 5px 15px; border-radius: 12px; font-weight: bold;")
+            
             self.val_ev.setText(f"{ev:.2f} pts")
             self.val_ev_energy.setText(f"{ev_per_energy:.2f} pts/energy")
             
             # Survival Score
             survival = evaluation['survival_score']
             self.val_survival.setValue(int(survival))
-            
-            # Decision Badge
-            decision = evaluation['decision']
-            badge_text = badge_prefix + decision.replace("_", " ")
-            if "RESTART" in decision or "CONVERT" in decision:
-                badge_text += " (EXPERIMENTAL)"
-            self.decision_badge.setText(badge_text)
-            
-            if is_partial:
-                # Amber pulsing style for in-progress
-                self.decision_badge.setStyleSheet(
-                    "background-color: #e65100; color: white; padding: 5px 15px; border-radius: 12px; font-weight: bold;"
-                )
-            elif decision == "CONTINUE":
-                self.decision_badge.setStyleSheet("background-color: #2e7d32; color: white; padding: 5px 15px; border-radius: 12px; font-weight: bold;")
-            elif decision == "RESTART_GAME":
-                self.decision_badge.setStyleSheet("background-color: #ef6c00; color: white; padding: 5px 15px; border-radius: 12px; font-weight: bold;")
-            elif decision == "STOP_AND_CONVERT":
-                self.decision_badge.setStyleSheet("background-color: #c62828; color: white; padding: 5px 15px; border-radius: 12px; font-weight: bold;")
-            else:
-                self.decision_badge.setStyleSheet("background-color: #424242; color: white; padding: 5px 15px; border-radius: 12px; font-weight: bold;")
                 
             # Explain move reasons
             reasons = solver.explain_move(self.current_board, best_move, self.config)
@@ -2245,7 +2297,7 @@ class Solver2048dGUI(QMainWindow):
                 is_finished = m in self.completed_modes
                 status = "finished" if is_finished else "searching..."
                 if m_max_d >= 2:
-                    m_event = self.current_search_results[m][m_max_d]
+                    m_event = self.current_search_results.get(m, {}).get(m_max_d, {})
                     m_best_move = m_event.get("best_move")
                     m_nodes = m_event.get("nodes", 0)
                     m_time = m_event.get("elapsed_ms", 0.0)
@@ -2258,7 +2310,7 @@ class Solver2048dGUI(QMainWindow):
             fair_depth = completed_depth  # In evaluation dict, completed_depth is fair_depth
             report.append(f"Global Fair Recommendation (at depth {fair_depth}):")
             for m in self.enabled_modes:
-                res_event = self.current_search_results[m].get(fair_depth)
+                res_event = self.current_search_results.get(m, {}).get(fair_depth)
                 if res_event:
                     report.append(f"  ● {m.upper()}: EV/Energy = {res_event['ev_per_energy']:.2f} (best {res_event['best_move']})")
                 else:
