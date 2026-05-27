@@ -26,7 +26,7 @@ class SolverThread(QThread):
     solver_finished = pyqtSignal(int)   # generation
     solver_progress = pyqtSignal(dict, int)   # event (dict), generation
     solver_failed = pyqtSignal(str)
-    
+
     def __init__(self, board, config, selected_mode, override_depth, override_time, use_empirical, enabled_modes, cancel_filepath, generation):
         super().__init__()
         self.board = board
@@ -39,10 +39,10 @@ class SolverThread(QThread):
         self.cancel_filepath = cancel_filepath
         self.generation = generation
         self.cancel_token = solver.CancelToken(cancel_filepath)
-        
+
     def cancel(self):
         self.cancel_token.cancel()
-        
+
     def run(self):
         import multiprocessing
         import queue as queue_lib
@@ -53,10 +53,10 @@ class SolverThread(QThread):
                 if self.cancel_token.is_cancelled():
                     return
                 empirical_patterns = summary.get('empirical_probabilities')
-                
+
             # Create a multiprocessing queue
             queue = multiprocessing.Queue()
-            
+
             # Start worker processes
             processes = {}
             for mode in self.enabled_modes:
@@ -77,9 +77,9 @@ class SolverThread(QThread):
                 proc.daemon = True
                 proc.start()
                 processes[mode] = proc
-                
+
             active_modes = set(self.enabled_modes)
-            
+
             while active_modes and not self.cancel_token.is_cancelled():
                 try:
                     event = queue.get(timeout=0.05)
@@ -108,16 +108,16 @@ class SolverThread(QThread):
                             self.solver_progress.emit(fake_event, self.generation)
                             active_modes.remove(mode)
                 time.sleep(0.01)
-                
+
             if self.cancel_token.is_cancelled():
                 for proc in processes.values():
                     if proc.is_alive():
                         proc.terminate()
                 return
-                
+
             for proc in processes.values():
                 proc.join(timeout=0.5)
-                
+
             self.solver_finished.emit(self.generation)
         except Exception as e:
             self.solver_failed.emit(traceback.format_exc())
@@ -153,11 +153,11 @@ class TileButton(QPushButton):
     """Custom button that handles left and right clicks independently."""
     clicked_left = pyqtSignal()
     clicked_right = pyqtSignal()
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)
-        
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked_left.emit()
@@ -173,7 +173,7 @@ class Solver2048dGUI(QMainWindow):
         # Ensure capture config is loaded cleanly from capture_config.yaml
         from src.image_parser import load_capture_config
         self.config['capture'] = load_capture_config()
-        
+
         # State variables
         self.current_board = 0
         self.board_before_move = 0
@@ -181,62 +181,62 @@ class Solver2048dGUI(QMainWindow):
         self.last_move_taken = None
         self.last_rec_move = None
         self.capture_warning_cells = set()
-        
+
         self.total_score = 0
         self.total_energy = 0
         self.total_moves = 0
-        
+
         # Game loop states: "NORMAL", "WAITING_FOR_SPAWN"
         self.gui_state = "NORMAL"
         self.enabled_modes = []
         self.selected_mode = None
         self.current_search_results = {}
         self.completed_modes = set()
-        
+
         # Undo history: holds tuples of (board, score, energy, moves, state)
         self.history = []
         self.empty_spawn_confirmed = False
         self.active_threads = []
         self._solver_generation = 0  # Incremented each time run_solver is called; used to discard stale results
-        
+
         self.init_ui()
         self.update_board_display()
         self.refresh_stats()
         self.run_solver()
-        
+
         # Capture Server integration
         self.latest_screenshot_path = None
         self.capture_emitter = CaptureSignalEmitter()
         self.capture_emitter.capture_received.connect(self.handle_incoming_capture)
         self.capture_emitter.status_changed.connect(self.update_status_label)
-        
+
         capture_cfg = self.config.get('capture', {})
         if capture_cfg.get('enabled', True):
             import src.capture_server as capture_server
             port = capture_cfg.get('port', 5000)
-            
+
             def server_cb(filepath, grid):
                 self.capture_emitter.capture_received.emit(filepath, grid or [])
-                
+
             def status_cb(status_text):
                 # Map plain text status to emoji statuses in the GUI
                 if status_text == "Parsing...":
                     status_text = "⚙️ Parsing..."
                 self.capture_emitter.status_changed.emit(status_text)
-                
+
             capture_server.start_server(port=port, callback=server_cb, status_callback=status_cb)
-            
+
     def init_ui(self):
         capture_cfg = self.config.get('capture', {})
         self.setWindowTitle("Solver 2048d — KDE Remote Desktop Helper")
         self.resize(1380, 680)
-        
+
         # Main Central Widget and Layout
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
         main_layout.setSpacing(15)
-        
+
         # Styling Theme: Sleek Dark Mode
         self.setStyleSheet("""
             QMainWindow {
@@ -357,25 +357,25 @@ class Solver2048dGUI(QMainWindow):
                 border-top-color: #666677;
             }
         """)
-        
+
         # ------------------ LEFT COLUMN (Board Panel) ------------------
         left_panel = QFrame()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(15, 10, 15, 15)
         left_layout.setSpacing(5)
-        
+
         # Title and Game Stats
         header_label = QLabel("BOARD VIEW")
         header_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #4facfe; margin-bottom: 2px;")
         header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         left_layout.addWidget(header_label)
-        
+
         # Stats Display Grid
         stats_frame = QFrame()
         stats_frame.setStyleSheet("background-color: #16161c; border: none;")
         stats_grid = QGridLayout(stats_frame)
         stats_grid.setContentsMargins(5, 5, 5, 5)
-        
+
         self.score_val_label = QLabel("Score: 0")
         self.score_val_label.setStyleSheet("font-weight: bold; font-size: 15px; color: #4caf50;")
         self.energy_val_label = QLabel("Energy: 0")
@@ -384,14 +384,14 @@ class Solver2048dGUI(QMainWindow):
         self.moves_val_label.setStyleSheet("font-weight: bold; font-size: 15px; color: #e0e0e0;")
         self.efficiency_val_label = QLabel("Pts/Energy: 0.0")
         self.efficiency_val_label.setStyleSheet("font-weight: bold; font-size: 15px; color: #00e676;")
-        
+
         stats_grid.addWidget(self.score_val_label, 0, 0)
         stats_grid.addWidget(self.energy_val_label, 0, 1)
         stats_grid.addWidget(self.moves_val_label, 1, 0)
         stats_grid.addWidget(self.efficiency_val_label, 1, 1)
-        
+
         left_layout.addWidget(stats_frame)
-        
+
         # Spawn Warning / Interactive Status Banner
         self.status_banner = QLabel("STATUS: Edit board manually or apply moves")
         self.status_banner.setStyleSheet("""
@@ -404,14 +404,14 @@ class Solver2048dGUI(QMainWindow):
         """)
         self.status_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
         left_layout.addWidget(self.status_banner)
-        
+
         # 4x4 Grid of Tile Buttons
         grid_frame = QFrame()
         grid_frame.setStyleSheet("background-color: #25252d; border-radius: 10px; border: 1px solid #33333f;")
         self.grid_layout = QGridLayout(grid_frame)
         self.grid_layout.setSpacing(8)
         self.grid_layout.setContentsMargins(10, 10, 10, 10)
-        
+
         self.buttons = []
         for r in range(4):
             row_buttons = []
@@ -422,94 +422,94 @@ class Solver2048dGUI(QMainWindow):
                 self.grid_layout.addWidget(btn, r, c)
                 row_buttons.append(btn)
             self.buttons.append(row_buttons)
-            
+
         left_layout.addWidget(grid_frame)
-        
+
         # Manual Action Buttons
         action_frame = QFrame()
         action_frame.setStyleSheet("background-color: #1e1e24; border: 1px solid #2d2d35; border-radius: 8px; margin-top: 5px; margin-bottom: 5px;")
         action_layout = QHBoxLayout(action_frame)
         action_layout.setContentsMargins(10, 10, 10, 10)
-        
+
         action_label = QLabel("Apply Action:")
         action_label.setStyleSheet("font-weight: bold; color: #b0bec5;")
         action_layout.addWidget(action_label)
-        
+
         self.btn_move_left = QPushButton("◀ LEFT")
         self.btn_move_left.clicked.connect(lambda: self.execute_move(game_engine.LEFT))
-        
+
         self.btn_move_up = QPushButton("▲ UP")
         self.btn_move_up.clicked.connect(lambda: self.execute_move(game_engine.UP))
-        
+
         self.btn_move_down = QPushButton("▼ DOWN")
         self.btn_move_down.clicked.connect(lambda: self.execute_move(game_engine.DOWN))
-        
+
         self.btn_move_right = QPushButton("RIGHT ▶")
         self.btn_move_right.clicked.connect(lambda: self.execute_move(game_engine.RIGHT))
-        
+
         self.btn_apply_rec = QPushButton("⚡ Apply Recommended")
         self.btn_apply_rec.setStyleSheet("background-color: #00796b; border-color: #00897b; color: white;")
         self.btn_apply_rec.clicked.connect(self.execute_recommended_move)
-        
+
         action_layout.addWidget(self.btn_move_left)
         action_layout.addWidget(self.btn_move_up)
         action_layout.addWidget(self.btn_move_down)
         action_layout.addWidget(self.btn_move_right)
         action_layout.addWidget(self.btn_apply_rec)
-        
+
         left_layout.addWidget(action_frame)
-        
+
         # Board View Control Buttons
         board_controls = QHBoxLayout()
         self.btn_reset = QPushButton("Reset Board")
         self.btn_reset.setStyleSheet("background-color: #552222; border-color: #773333;")
         self.btn_reset.clicked.connect(self.reset_board)
-        
+
         self.btn_new_game = QPushButton("New Game")
         self.btn_new_game.setStyleSheet("background-color: #1b5e20; border-color: #2e7d32;")
         self.btn_new_game.clicked.connect(self.new_game)
-        
+
         self.btn_undo = QPushButton("Undo")
         self.btn_undo.clicked.connect(self.undo)
-        
+
         self.btn_confirm_spawn = QPushButton("Confirm Spawn")
         self.btn_confirm_spawn.setEnabled(False)
         self.btn_confirm_spawn.setStyleSheet("background-color: #0d47a1; border-color: #1565c0;")
         self.btn_confirm_spawn.clicked.connect(self.confirm_spawn)
-        
+
         board_controls.addWidget(self.btn_reset)
         board_controls.addWidget(self.btn_new_game)
         board_controls.addWidget(self.btn_undo)
         board_controls.addWidget(self.btn_confirm_spawn)
-        
+
         left_layout.addLayout(board_controls)
-        
+
         # Keyboard Move Guide
         guide_label = QLabel("💡 Tip: Use Arrow Keys on this window to swipe in-game!")
         guide_label.setStyleSheet("color: #78909c; font-size: 12px; margin-top: 5px;")
         guide_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         left_layout.addWidget(guide_label)
-        
+
         main_layout.addWidget(left_panel, 11)
-        
+
         # ------------------ RIGHT COLUMN (Solver & Stats) ------------------
         right_panel = QFrame()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(15, 10, 15, 15)
         right_layout.setSpacing(5)
-        
+
         # Solver Header
         solver_header = QLabel("SOLVER RECOMMENDATION")
         solver_header.setStyleSheet("font-size: 15px; font-weight: bold; color: #00e676; margin-bottom: 2px;")
         solver_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         right_layout.addWidget(solver_header)
-        
+
         # Config options and Solver Budget Settings
         settings_frame = QFrame()
         settings_frame.setStyleSheet("background-color: #1e1e24; border: 1px solid #2d2d35; border-radius: 8px; padding: 10px; margin-bottom: 5px;")
         settings_layout = QGridLayout(settings_frame)
         settings_layout.setSpacing(10)
-        
+
         # Row 0: Mode Selector and Checkboxes
         settings_layout.addWidget(QLabel("Multiplier Mode:"), 0, 0)
         self.mode_selector = QComboBox()
@@ -517,29 +517,29 @@ class Solver2048dGUI(QMainWindow):
             self.mode_selector.addItem(f"{mode.upper()} (Energy: {self.config['modes'][mode]['energy_cost']})", mode)
         self.mode_selector.currentIndexChanged.connect(self.run_solver)
         settings_layout.addWidget(self.mode_selector, 0, 1)
-        
+
         # Combined X8/X16 block
         x_modes_layout = QHBoxLayout()
         x_modes_layout.setContentsMargins(0, 0, 0, 0)
         x_modes_layout.setSpacing(15)
-        
+
         self.chk_x8 = QCheckBox("X8")
         self.chk_x8.setChecked(False)
         self.chk_x8.stateChanged.connect(self.run_solver)
         x_modes_layout.addWidget(self.chk_x8)
-        
+
         self.chk_x16 = QCheckBox("X16")
         self.chk_x16.setChecked(False)
         self.chk_x16.stateChanged.connect(self.run_solver)
         x_modes_layout.addWidget(self.chk_x16)
-        
+
         settings_layout.addLayout(x_modes_layout, 0, 2)
-        
+
         self.chk_empirical_spawn = QCheckBox("Use Empirical Spawns")
         self.chk_empirical_spawn.setChecked(True)
         self.chk_empirical_spawn.stateChanged.connect(self.run_solver)
         settings_layout.addWidget(self.chk_empirical_spawn, 0, 3)
-        
+
         # Row 1: Search Depth and Time Limit
         settings_layout.addWidget(QLabel("Search Depth:"), 1, 0)
         self.depth_selector = QComboBox()
@@ -552,7 +552,7 @@ class Solver2048dGUI(QMainWindow):
         self.depth_selector.addItem("Depth 7 (Ultimate)", 7)
         self.depth_selector.currentIndexChanged.connect(self.run_solver)
         settings_layout.addWidget(self.depth_selector, 1, 1)
-        
+
         settings_layout.addWidget(QLabel("Max Time:"), 1, 2)
         self.time_selector = QComboBox()
         self.time_selector.addItem("500 ms", 500)
@@ -564,29 +564,29 @@ class Solver2048dGUI(QMainWindow):
         self.time_selector.setCurrentIndex(1) # Default to 1000 ms
         self.time_selector.currentIndexChanged.connect(self.run_solver)
         settings_layout.addWidget(self.time_selector, 1, 3)
-        
+
         # Solve Button
         self.btn_solve = QPushButton("Solve")
         self.btn_solve.setStyleSheet("background-color: #006064; border-color: #00838f;")
         self.btn_solve.clicked.connect(self.run_solver)
-        
+
         # Create a container vertical layout to hold the settings frame and solve button
         settings_container = QVBoxLayout()
         settings_container.addWidget(settings_frame)
         settings_container.addWidget(self.btn_solve)
         right_layout.addLayout(settings_container)
-        
+
         # Recommendation display
         self.rec_card = QFrame()
         self.rec_card.setStyleSheet("background-color: #16161c; padding: 10px;")
         rec_card_layout = QVBoxLayout(self.rec_card)
-        
+
         # Direction
         self.rec_dir_label = QLabel("NO RECOMMENDATION")
         self.rec_dir_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #ffffff;")
         self.rec_dir_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         rec_card_layout.addWidget(self.rec_dir_label)
-        
+
         # Decision Badge
         self.decision_badge = QLabel("WAITING")
         self.decision_badge.setStyleSheet("""
@@ -599,64 +599,64 @@ class Solver2048dGUI(QMainWindow):
         """)
         self.decision_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         rec_card_layout.addWidget(self.decision_badge)
-        
+
         # Detail numbers
         details_layout = QGridLayout()
         details_layout.addWidget(QLabel("Expected Score (EV):"), 0, 0)
         self.val_ev = QLabel("N/A")
         self.val_ev.setStyleSheet("font-weight: bold;")
         details_layout.addWidget(self.val_ev, 0, 1)
-        
+
         details_layout.addWidget(QLabel("EV Per Energy:"), 1, 0)
         self.val_ev_energy = QLabel("N/A")
         self.val_ev_energy.setStyleSheet("font-weight: bold; color: #00e676;")
         details_layout.addWidget(self.val_ev_energy, 1, 1)
-        
+
         details_layout.addWidget(QLabel("Survival Score:"), 2, 0)
         self.val_survival = QProgressBar()
         self.val_survival.setValue(0)
         details_layout.addWidget(self.val_survival, 2, 1)
-        
+
         rec_card_layout.addLayout(details_layout)
         right_layout.addWidget(self.rec_card)
-        
+
         # Reasons textbox
         right_layout.addWidget(QLabel("Why this move?"))
         self.reasons_box = QTextEdit()
         self.reasons_box.setReadOnly(True)
         self.reasons_box.setStyleSheet("background-color: #121216; color: #90a4ae; font-size: 13px;")
         right_layout.addWidget(self.reasons_box)
-        
+
         # Empirical spawn statistics card
         right_layout.addWidget(QLabel("Empirical Spawn Statistics"))
         self.stats_card = QFrame()
         self.stats_card.setStyleSheet("background-color: #16161c; padding: 10px;")
         stats_card_layout = QVBoxLayout(self.stats_card)
-        
+
         self.stats_text = QLabel("Loading stats...")
         self.stats_text.setWordWrap(True)
         self.stats_text.setStyleSheet("font-size: 12px; color: #b0bec5;")
         stats_card_layout.addWidget(self.stats_text)
-        
+
         btn_refresh_stats = QPushButton("Refresh Stats")
         btn_refresh_stats.clicked.connect(self.refresh_stats)
         stats_card_layout.addWidget(btn_refresh_stats)
-        
+
         right_layout.addWidget(self.stats_card)
-        
+
         main_layout.addWidget(right_panel, 9)
-        
+
         # ------------------ RIGHTMOST COLUMN (Android Capture & Calibration) ------------------
         capture_panel = QFrame()
         capture_layout = QVBoxLayout(capture_panel)
         capture_layout.setContentsMargins(15, 10, 15, 15)
         capture_layout.setSpacing(5)
-        
+
         capture_header = QLabel("ANDROID CAPTURE")
         capture_header.setStyleSheet("font-size: 15px; font-weight: bold; color: #4facfe; margin-bottom: 2px;")
         capture_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         capture_layout.addWidget(capture_header)
-        
+
         # Grid settings region (Single row super-compact horizontal layout)
         capture_settings_frame = QFrame()
         capture_settings_frame.setStyleSheet("QFrame { background-color: #1e1e24; border: 1px solid #2d2d35; border-radius: 8px; padding: 6px; }")
@@ -670,7 +670,7 @@ class Solver2048dGUI(QMainWindow):
         self.btn_capture_now.clicked.connect(self.request_android_capture)
         self.btn_capture_now.setMaximumWidth(100)
         capture_settings_layout.addWidget(self.btn_capture_now, 1)
-        
+
         # 2. Capture Mode
         self.cmb_capture_mode = QComboBox()
         self.cmb_capture_mode.addItems(["🔢 Lvl", "✖️ Mult"])
@@ -688,22 +688,26 @@ class Solver2048dGUI(QMainWindow):
         capture_settings_layout.addWidget(self.lbl_capture_status, 3)
 
         capture_layout.addWidget(capture_settings_frame)
-        
+
         # Live Preview Label
         self.lbl_screenshot_preview = QLabel("No screenshot uploaded yet.\n\nStart PowerShell agent on Windows,\nthen click Capture Android.")
         self.lbl_screenshot_preview.setStyleSheet("border: 1px dashed #424242; border-radius: 4px; background-color: #15151b; color: #78909c;")
         self.lbl_screenshot_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_screenshot_preview.setMinimumHeight(550)
         capture_layout.addWidget(self.lbl_screenshot_preview)
-        
+
         # Calibration Controls (SpinBoxes) - Single line QHBoxLayout
         calibration_frame = QFrame()
         calibration_frame.setStyleSheet("QFrame { background-color: #1e1e24; border: 1px solid #2d2d35; padding: 4px; }")
         cal_layout = QHBoxLayout(calibration_frame)
         cal_layout.setContentsMargins(6, 4, 6, 4)
         cal_layout.setSpacing(6)
-        
-        cal_layout.addWidget(QLabel("X:"))
+
+        lbl_style = "font-size: 11px; font-weight: bold; color: #b0bec5;"
+
+        lbl_x = QLabel("X")
+        lbl_x.setStyleSheet(lbl_style)
+        cal_layout.addWidget(lbl_x)
         self.spn_crop_x = QSpinBox()
         self.spn_crop_x.setRange(0, 9999)
         self.spn_crop_x.setValue(self.config.get('capture', {}).get('crop_x', 40))
@@ -711,8 +715,10 @@ class Solver2048dGUI(QMainWindow):
         self.spn_crop_x.setFixedHeight(24)
         self.spn_crop_x.valueChanged.connect(self.handle_calibration_changed)
         cal_layout.addWidget(self.spn_crop_x)
-        
-        cal_layout.addWidget(QLabel("Y:"))
+
+        lbl_y = QLabel("Y")
+        lbl_y.setStyleSheet(lbl_style)
+        cal_layout.addWidget(lbl_y)
         self.spn_crop_y = QSpinBox()
         self.spn_crop_y.setRange(0, 9999)
         self.spn_crop_y.setValue(self.config.get('capture', {}).get('crop_y', 900))
@@ -720,8 +726,10 @@ class Solver2048dGUI(QMainWindow):
         self.spn_crop_y.setFixedHeight(24)
         self.spn_crop_y.valueChanged.connect(self.handle_calibration_changed)
         cal_layout.addWidget(self.spn_crop_y)
-        
-        cal_layout.addWidget(QLabel("W:"))
+
+        lbl_w = QLabel("W")
+        lbl_w.setStyleSheet(lbl_style)
+        cal_layout.addWidget(lbl_w)
         self.spn_crop_w = QSpinBox()
         self.spn_crop_w.setRange(10, 9999)
         self.spn_crop_w.setValue(self.config.get('capture', {}).get('crop_w', 950))
@@ -729,8 +737,10 @@ class Solver2048dGUI(QMainWindow):
         self.spn_crop_w.setFixedHeight(24)
         self.spn_crop_w.valueChanged.connect(self.handle_calibration_changed)
         cal_layout.addWidget(self.spn_crop_w)
-        
-        cal_layout.addWidget(QLabel("H:"))
+
+        lbl_h = QLabel("H")
+        lbl_h.setStyleSheet(lbl_style)
+        cal_layout.addWidget(lbl_h)
         self.spn_crop_h = QSpinBox()
         self.spn_crop_h.setRange(10, 9999)
         self.spn_crop_h.setValue(self.config.get('capture', {}).get('crop_h', 880))
@@ -738,7 +748,14 @@ class Solver2048dGUI(QMainWindow):
         self.spn_crop_h.setFixedHeight(24)
         self.spn_crop_h.valueChanged.connect(self.handle_calibration_changed)
         cal_layout.addWidget(self.spn_crop_h)
-        
+
+        # Save button immediately after H box
+        self.btn_save_cal = QPushButton("💾 Save")
+        self.btn_save_cal.setStyleSheet("background-color: #00796b; color: white; padding: 4px 8px; font-weight: bold;")
+        self.btn_save_cal.setFixedHeight(24)
+        self.btn_save_cal.clicked.connect(self.save_crop_settings)
+        cal_layout.addWidget(self.btn_save_cal)
+
         capture_layout.addWidget(calibration_frame)
 
         # Action controls for calibration — wrapped in a dark frame with two rows.
@@ -750,7 +767,7 @@ class Solver2048dGUI(QMainWindow):
         cal_actions_layout.setContentsMargins(4, 4, 4, 4)
         cal_actions_layout.setSpacing(6)
 
-        # Row 1: Checkboxes and Save Crop
+        # Row 1: Checkboxes
         row1_layout = QHBoxLayout()
         row1_layout.setSpacing(8)
 
@@ -772,11 +789,6 @@ class Solver2048dGUI(QMainWindow):
         row1_layout.addWidget(self.chk_auto_apply)
 
         row1_layout.addStretch()
-
-        self.btn_save_cal = QPushButton("💾 Save Crop")
-        self.btn_save_cal.setStyleSheet("background-color: #00796b; color: white; padding: 4px 8px;")
-        self.btn_save_cal.clicked.connect(self.save_crop_settings)
-        row1_layout.addWidget(self.btn_save_cal)
 
         cal_actions_layout.addLayout(row1_layout)
 
@@ -815,9 +827,9 @@ class Solver2048dGUI(QMainWindow):
         cal_actions_layout.addLayout(row2_layout)
 
         capture_layout.addWidget(cal_actions_frame)
-        
+
         main_layout.addWidget(capture_panel, 9)
-        
+
         # Window attributes
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setFocus()
@@ -825,7 +837,7 @@ class Solver2048dGUI(QMainWindow):
     def update_status_label(self, text):
         """Updates the status label text and dynamically adjusts its stylesheet colors."""
         self.lbl_capture_status.setText(text)
-        
+
         # Determine background and text colors based on status content
         if "🛑" in text or "❌" in text or "Failed" in text:
             # Red background for mismatch/errors/failures
@@ -843,7 +855,7 @@ class Solver2048dGUI(QMainWindow):
             # Default dark background for idle/passive states
             bg_color = "#15151b"
             fg_color = "#b0bec5"
-            
+
         self.lbl_capture_status.setStyleSheet(
             f"color: {fg_color}; font-weight: bold; font-size: 12px; "
             f"background-color: {bg_color}; border-radius: 4px; padding: 6px;"
@@ -862,10 +874,10 @@ class Solver2048dGUI(QMainWindow):
         """Thread-safe slot triggered when a new screenshot is uploaded and parsed."""
         self.latest_screenshot_path = filepath
         self.update_screenshot_display()
-        
+
         if grid:
             board_int = game_engine.list_to_board(grid)
-            
+
             # Post-swipe validation: check if the board didn't change at all
             if self.gui_state == "WAITING_FOR_SPAWN" and board_int == self.board_before_move:
                 if hasattr(self, 'chk_auto_apply') and self.chk_auto_apply.isChecked():
@@ -877,19 +889,19 @@ class Solver2048dGUI(QMainWindow):
                             game_engine.RIGHT: "RIGHT",
                             game_engine.DOWN: "DOWN"
                         }.get(move_const)
-                        
+
                         if dir_str:
                             import src.capture_server as capture_server
                             crop_x = self.spn_crop_x.value()
                             crop_y = self.spn_crop_y.value()
                             crop_w = self.spn_crop_w.value()
                             crop_h = self.spn_crop_h.value()
-                            
+
                             cx = int(crop_x + crop_w / 2)
                             cy = int(crop_y + crop_h / 2)
                             x_offset = int(crop_w * 0.3)
                             y_offset = int(crop_h * 0.3)
-                            
+
                             coords_map = {
                                 game_engine.LEFT:  [cx + x_offset, cy, cx - x_offset, cy, 120],
                                 game_engine.RIGHT: [cx - x_offset, cy, cx + x_offset, cy, 120],
@@ -897,7 +909,7 @@ class Solver2048dGUI(QMainWindow):
                                 game_engine.DOWN:  [cx, cy - y_offset, cx, cy + y_offset, 120]
                             }
                             swipe_coords = coords_map.get(move_const)
-                            
+
                             capture_server.set_action_requested(dir_str, swipe_coords)
                             self.update_status_label(f"⚡ Retrying {dir_str}...")
                             self.statusBar().showMessage(f"Swipe failed to register. Retrying {dir_str}...", 3000)
@@ -906,11 +918,11 @@ class Solver2048dGUI(QMainWindow):
                 self.update_status_label("🛑 Swipe Failed")
                 self.statusBar().showMessage("Swipe failed to register. Verify ADB connection and retry.", 5000)
                 return
-            
+
             self.save_history()
             self.capture_warning_cells = self.find_capture_mismatch_cells(board_int)
             self.current_board = board_int
-            
+
             if self.capture_warning_cells:
                 warning_count = len(self.capture_warning_cells)
                 self.update_status_label(f"🛑 Parsed ({warning_count})")
@@ -921,7 +933,7 @@ class Solver2048dGUI(QMainWindow):
             else:
                 self.update_status_label("✅ Parsed")
                 self.statusBar().showMessage("Board updated from Android capture!", 4000)
-            
+
             # If waiting for spawn, auto-confirm and return to normal
             if self.gui_state == "WAITING_FOR_SPAWN":
                 self.confirm_spawn()
@@ -940,20 +952,20 @@ class Solver2048dGUI(QMainWindow):
         self.config['capture']['crop_y'] = self.spn_crop_y.value()
         self.config['capture']['crop_w'] = self.spn_crop_w.value()
         self.config['capture']['crop_h'] = self.spn_crop_h.value()
-        
+
         self.update_screenshot_display()
 
     def handle_capture_mode_changed(self):
         """Fires when the capture parse mode dropdown is modified."""
         if 'capture' not in self.config:
             self.config['capture'] = {}
-        
+
         index = self.cmb_capture_mode.currentIndex()
         if index == 1:
             self.config['capture']['mode'] = 'x'
         else:
             self.config['capture']['mode'] = 'level'
-            
+
         # Re-parse if there is an active screenshot
         if getattr(self, 'latest_screenshot_path', None) and os.path.exists(self.latest_screenshot_path):
             self.reparse_current_screenshot()
@@ -1028,41 +1040,41 @@ class Solver2048dGUI(QMainWindow):
         """Draws the crop box and 4x4 grid overlay on the latest screenshot and scales it to fit."""
         if not getattr(self, 'latest_screenshot_path', None) or not os.path.exists(self.latest_screenshot_path):
             return
-            
+
         try:
             x = self.spn_crop_x.value()
             y = self.spn_crop_y.value()
             w = self.spn_crop_w.value()
             h = self.spn_crop_h.value()
-            
+
             pixmap_copy = QPixmap(self.latest_screenshot_path)
             if pixmap_copy.isNull():
                 return
-                
+
             painter = QPainter(pixmap_copy)
-            
+
             # Draw crop box (red, thick)
             pen = QPen(QColor(255, 23, 68), 6)
             painter.setPen(pen)
             painter.drawRect(x, y, w, h)
-            
+
             # Draw 4x4 inner grid lines
             if self.chk_show_grid.isChecked():
                 pen_grid = QPen(QColor(255, 255, 255, 200), 2, Qt.PenStyle.DashLine)
                 painter.setPen(pen_grid)
-                
+
                 # Verticals
                 for i in range(1, 4):
                     vx = int(x + i * (w / 4))
                     painter.drawLine(vx, y, vx, y + h)
-                    
+
                 # Horizontals
                 for i in range(1, 4):
                     vy = int(y + i * (h / 4))
                     painter.drawLine(x, vy, x + w, vy)
-                    
+
             painter.end()
-            
+
             # Scale to fit QLabel
             lbl_w = max(100, self.lbl_screenshot_preview.width())
             lbl_h = max(100, self.lbl_screenshot_preview.height())
@@ -1073,24 +1085,24 @@ class Solver2048dGUI(QMainWindow):
                 Qt.TransformationMode.SmoothTransformation
             )
             self.lbl_screenshot_preview.setPixmap(scaled)
-            
+
             # Automatically save the cropped board region with grid overlay to logs/debug_cropped.png
             try:
                 from PIL import Image, ImageDraw
                 img = Image.open(self.latest_screenshot_path)
                 img_w, img_h = img.size
-                
+
                 # Clamp coordinates to avoid PIL errors
                 c_x = max(0, min(x, img_w - 1))
                 c_y = max(0, min(y, img_h - 1))
                 c_w = min(w, img_w - c_x)
                 c_h = min(h, img_h - c_y)
-                
+
                 if c_w > 0 and c_h > 0:
                     board_img = img.crop((c_x, c_y, c_x + c_w, c_y + c_h))
                     debug_img = board_img.copy()
                     draw = ImageDraw.Draw(debug_img)
-                    
+
                     # Draw grid lines on the crop
                     cell_w = c_w / 4
                     cell_h = c_h / 4
@@ -1100,7 +1112,7 @@ class Solver2048dGUI(QMainWindow):
                         vy = int(i * cell_h)
                         draw.line([(0, vy), (c_w, vy)], fill=(255, 0, 0), width=3)
                     draw.rectangle([(0, 0), (c_w - 1, c_h - 1)], outline=(255, 0, 0), width=4)
-                    
+
                     debug_path = os.path.join(LOGS_DIR, "debug_cropped.png")
                     debug_img.save(debug_path)
             except Exception as e:
@@ -1113,9 +1125,9 @@ class Solver2048dGUI(QMainWindow):
         if not getattr(self, 'latest_screenshot_path', None) or not os.path.exists(self.latest_screenshot_path):
             self.statusBar().showMessage("No screenshot available to reparse!", 2000)
             return
-            
+
         self.update_status_label("⚙️ Parsing...")
-        
+
         import src.image_parser as image_parser
         grid = image_parser.parse_screenshot(self.latest_screenshot_path)
         if grid:
@@ -1123,12 +1135,12 @@ class Solver2048dGUI(QMainWindow):
             self.save_history()
             self.capture_warning_cells = self.find_capture_mismatch_cells(board_int)
             self.current_board = board_int
-            
+
             if self.gui_state == "WAITING_FOR_SPAWN":
                 self.gui_state = "NORMAL"
                 self.reset_confirm_spawn_button()
                 self.update_gui_state_display()
-                
+
             self.update_board_display()
             if self.capture_warning_cells:
                 warning_count = len(self.capture_warning_cells)
@@ -1152,34 +1164,34 @@ class Solver2048dGUI(QMainWindow):
             path = CAPTURE_CONFIG_PATH
             with open(path, "r") as f:
                 yaml_data = yaml.safe_load(f) or {}
-                
+
             if 'capture' not in yaml_data:
                 yaml_data['capture'] = {}
-                
+
             yaml_data['capture']['crop_x'] = self.spn_crop_x.value()
             yaml_data['capture']['crop_y'] = self.spn_crop_y.value()
             yaml_data['capture']['crop_w'] = self.spn_crop_w.value()
             yaml_data['capture']['crop_h'] = self.spn_crop_h.value()
-            
+
             # Save the active parsing mode
             index = self.cmb_capture_mode.currentIndex()
             yaml_data['capture']['mode'] = 'x' if index == 1 else 'level'
-            
+
             # Save the parser strategy setting
             self._apply_parser_strategy_to_config()
             yaml_data['capture']['template_matching'] = self.config['capture'].get('template_matching', False)
             yaml_data['capture']['template_match_policy'] = self.config['capture'].get('template_match_policy', 'dominant')
-            
+
             # Save the auto apply setting
             yaml_data['capture']['auto_apply'] = self.chk_auto_apply.isChecked()
-            
+
             with open(path, "w") as f:
                 yaml.safe_dump(yaml_data, f, default_flow_style=False)
-                
+
             self.statusBar().showMessage("Crop settings saved to capture_config.yaml successfully!", 3000)
         except Exception as e:
             self.statusBar().showMessage(f"Failed to save crop settings: {e}", 3000)
-            
+
     def recreate_crop_debug_image(self):
         """Forces manual regeneration of logs/debug_cropped.png and shows feedback."""
         if not getattr(self, 'latest_screenshot_path', None) or not os.path.exists(self.latest_screenshot_path):
@@ -1355,7 +1367,7 @@ class Solver2048dGUI(QMainWindow):
             crop_y = self.spn_crop_y.value()
             crop_w = self.spn_crop_w.value()
             crop_h = self.spn_crop_h.value()
-            
+
             cfg = self.config.get('capture', {})
             mode = cfg.get('mode', 'level')
 
@@ -1424,7 +1436,7 @@ class Solver2048dGUI(QMainWindow):
             self.statusBar().showMessage(f"Failed to add test case: {e}", 4000)
             print(f"Add test case error:\n{tb}")
 
-        
+
     def keyPressEvent(self, event: QKeyEvent):
         """Allows playing standard swipes using Arrow Keys."""
         if self.gui_state == "WAITING_FOR_SPAWN":
@@ -1433,7 +1445,7 @@ class Solver2048dGUI(QMainWindow):
             else:
                 super().keyPressEvent(event)
             return
-            
+
         direction = None
         if event.key() == Qt.Key.Key_Left:
             direction = game_engine.LEFT
@@ -1443,12 +1455,12 @@ class Solver2048dGUI(QMainWindow):
             direction = game_engine.UP
         elif event.key() == Qt.Key.Key_Down:
             direction = game_engine.DOWN
-            
+
         if direction is not None:
             self.execute_move(direction)
         else:
             super().keyPressEvent(event)
-            
+
     def get_tile_style(self, level, capture_warning=False):
         colors = {
             0: ("#2e2e38", "#ffffff"), # empty
@@ -1469,7 +1481,7 @@ class Solver2048dGUI(QMainWindow):
         border_radius = "8px"
         font_size = "16px"
         font_weight = "bold"
-        
+
         # If waiting for spawn, highlight empty cells with a dash border
         if self.gui_state == "WAITING_FOR_SPAWN" and level == 0:
             border = "2px dashed #0d47a1"
@@ -1477,7 +1489,7 @@ class Solver2048dGUI(QMainWindow):
 
         if capture_warning:
             border = "3px solid #ffeb3b"
-            
+
         return f"""
             QPushButton {{
                 background-color: {bg};
@@ -1494,7 +1506,7 @@ class Solver2048dGUI(QMainWindow):
                 border: 2px solid #00f2fe;
             }}
         """
-        
+
     def save_history(self):
         """Saves current state to undo history."""
         self.history.append((
@@ -1510,7 +1522,7 @@ class Solver2048dGUI(QMainWindow):
         # Cap undo size
         if len(self.history) > 50:
             self.history.pop(0)
-            
+
     def undo(self):
         if not self.history:
             QMessageBox.information(self, "Undo", "Nothing to undo!")
@@ -1526,14 +1538,14 @@ class Solver2048dGUI(QMainWindow):
             self.last_move_taken
         ) = self.history.pop()
         self.capture_warning_cells.clear()
-        
+
         self.update_board_display()
         self.update_stats_display()
         self.update_gui_state_display()
         self.reset_confirm_spawn_button()
         self.run_solver()
         self.setFocus()
-        
+
     def reset_board(self):
         self.save_history()
         self.current_board = 0
@@ -1544,7 +1556,7 @@ class Solver2048dGUI(QMainWindow):
         self.reset_confirm_spawn_button()
         self.run_solver()
         self.setFocus()
-        
+
     def new_game(self):
         # Log summary of previous game if played
         if self.total_moves > 0:
@@ -1561,7 +1573,7 @@ class Solver2048dGUI(QMainWindow):
                 stone_count,
                 "User initiated new game"
             )
-            
+
         self.save_history()
         self.current_board = 0
         self.total_score = 0
@@ -1569,34 +1581,34 @@ class Solver2048dGUI(QMainWindow):
         self.total_moves = 0
         self.gui_state = "NORMAL"
         self.capture_warning_cells.clear()
-        
+
         self.update_board_display()
         self.update_stats_display()
         self.update_gui_state_display()
         self.reset_confirm_spawn_button()
         self.run_solver()
         self.setFocus()
-        
+
     def set_board_cell(self, r, c, val):
         self.save_history()
         self.capture_warning_cells.discard((r, c))
         self.current_board = game_engine.set_cell(self.current_board, r, c, val)
         self.update_board_display()
-        
+
         if getattr(self, 'empty_spawn_confirmed', False):
             self.reset_confirm_spawn_button()
-            
+
         if self.gui_state == "NORMAL":
             self.run_solver()
-            
+
     def handle_cell_click(self, r, c, button_type):
         curr_lvl = game_engine.get_cell(self.current_board, r, c)
-        
+
         mode = self.mode_selector.currentData()
         mode_cfg = self.config['modes'][mode]
         low_spawn = mode_cfg['low_spawn']
         high_spawn = mode_cfg['high_spawn']
-        
+
         if button_type == "left":
             if curr_lvl == 0:
                 new_lvl = low_spawn
@@ -1608,42 +1620,42 @@ class Solver2048dGUI(QMainWindow):
                     new_lvl = 0
         else:
             new_lvl = 0
-            
+
         self.set_board_cell(r, c, new_lvl)
         self.setFocus()
-        
+
     def execute_move(self, direction):
         """Applies move direction, deducts energy, computes merge scores, triggers spawn state."""
         new_board, merge_score, valid = game_engine.apply_move(self.current_board, direction)
         if not valid:
             self.statusBar().showMessage("Invalid Move! Board does not change.", 2000)
             return
-            
+
         self.save_history()
         self.capture_warning_cells.clear()
-        
+
         mode = self.mode_selector.currentData()
         energy_cost = self.config['modes'][mode]['energy_cost']
-        
+
         # Save game state snapshot
         self.board_before_move = self.current_board
         self.board_after_move_no_spawn = new_board
         self.last_move_taken = direction
-        
+
         # Update board and stats
         self.current_board = new_board
         self.total_score += merge_score
         self.total_energy += energy_cost
         self.total_moves += 1
-        
+
         # Transition to spawn confirmation state
         self.gui_state = "WAITING_FOR_SPAWN"
-        
+
         self.update_board_display()
         self.update_stats_display()
         self.update_gui_state_display()
         self.setFocus()
-        
+
     def execute_recommended_move(self):
         """Applies the recommended move currently calculated by the solver and signals the agent to swipe."""
         if self.gui_state == "WAITING_FOR_SPAWN":
@@ -1651,7 +1663,7 @@ class Solver2048dGUI(QMainWindow):
         if getattr(self, 'last_rec_move', None) is not None:
             move_const = self.last_rec_move
             self.execute_move(move_const)
-            
+
             # Send action to capture server so the Android device executes it
             import src.capture_server as capture_server
             dir_str = {
@@ -1660,19 +1672,19 @@ class Solver2048dGUI(QMainWindow):
                 game_engine.RIGHT: "RIGHT",
                 game_engine.DOWN: "DOWN"
             }.get(move_const)
-            
+
             if dir_str:
                 # Calculate dynamic swipe coordinates based on formulas
                 crop_x = self.spn_crop_x.value()
                 crop_y = self.spn_crop_y.value()
                 crop_w = self.spn_crop_w.value()
                 crop_h = self.spn_crop_h.value()
-                
+
                 cx = int(crop_x + crop_w / 2)
                 cy = int(crop_y + crop_h / 2)
                 x_offset = int(crop_w * 0.3)
                 y_offset = int(crop_h * 0.3)
-                
+
                 coords_map = {
                     game_engine.LEFT:  [cx + x_offset, cy, cx - x_offset, cy, 120],
                     game_engine.RIGHT: [cx - x_offset, cy, cx + x_offset, cy, 120],
@@ -1680,28 +1692,28 @@ class Solver2048dGUI(QMainWindow):
                     game_engine.DOWN:  [cx, cy - y_offset, cx, cy + y_offset, 120]
                 }
                 swipe_coords = coords_map.get(move_const)
-                
+
                 capture_server.set_action_requested(dir_str, swipe_coords)
                 self.update_status_label(f"⚡ Swiping {dir_str}...")
         else:
             self.statusBar().showMessage("No recommended move to apply!", 2000)
-        
+
     def confirm_spawn(self):
         """Calculates difference, logs spawn observations and move result, returns to normal state."""
         # Find which cells changed from board_after_move_no_spawn to current_board
         before_grid = game_engine.board_to_list(self.board_after_move_no_spawn)
         after_grid = game_engine.board_to_list(self.current_board)
-        
+
         spawned_cells = []
         for r in range(4):
             for c in range(4):
                 bef = before_grid[r][c]
                 aft = after_grid[r][c]
-                
+
                 if bef != aft:
                     if bef == 0:
                         spawned_cells.append((r * 4 + c, aft))
-                        
+
         if not spawned_cells:
             if not getattr(self, 'empty_spawn_confirmed', False):
                 self.empty_spawn_confirmed = True
@@ -1709,25 +1721,25 @@ class Solver2048dGUI(QMainWindow):
                 self.btn_confirm_spawn.setStyleSheet("background-color: #b71c1c; border: 2px solid #ff1744; color: white; font-weight: bold;")
                 self.statusBar().showMessage("Empty spawn detected. Click Confirm again to force empty spawn.", 3000)
                 return
-                
+
         # Reset double confirmation state
         self.empty_spawn_confirmed = False
         self.btn_confirm_spawn.setText("Confirm Spawn")
         self.btn_confirm_spawn.setStyleSheet("background-color: #0d47a1; border-color: #1565c0; font-weight: bold; color: white;")
-        
+
         mode = self.mode_selector.currentData()
-        
+
         # Calculate appear points score of spawns
         appear_points_total = 0
         appear_tbl = self.config['appear_points']
         for cell_idx, lvl in spawned_cells:
             appear_points_total += appear_tbl.get(lvl, 0)
-            
+
         self.total_score += appear_points_total
-        
+
         # Calculate empty cells before spawn
         empty_count_before = sum(row.count(0) for row in before_grid)
-        
+
         # Log to files
         # 1. Spawn observation
         stats.log_spawn_observation(
@@ -1738,7 +1750,7 @@ class Solver2048dGUI(QMainWindow):
             self.board_after_move_no_spawn,
             self.current_board
         )
-        
+
         # 2. Move result
         # Calculate merge score
         # merge_score = total score delta - appear points
@@ -1752,7 +1764,7 @@ class Solver2048dGUI(QMainWindow):
             spawned_cells,
             self.current_board
         )
-        
+
         self.gui_state = "NORMAL"
         self.update_stats_display()
         self.update_gui_state_display()
@@ -1760,7 +1772,7 @@ class Solver2048dGUI(QMainWindow):
         self.refresh_stats()
         self.run_solver()
         self.setFocus()
-        
+
     def reset_confirm_spawn_button(self):
         """Resets the Confirm Spawn button to its normal state."""
         self.empty_spawn_confirmed = False
@@ -1770,7 +1782,7 @@ class Solver2048dGUI(QMainWindow):
                 self.btn_confirm_spawn.setStyleSheet("background-color: #0d47a1; border-color: #1565c0; font-weight: bold; color: white;")
             else:
                 self.btn_confirm_spawn.setStyleSheet("")
-                
+
     def reset_action_button_styles(self):
         """Resets the manual directional swipe action buttons to standard styles."""
         style = "background-color: #2a2a35; border: 1px solid #3d3d4b; border-radius: 4px; padding: 6px 12px; font-weight: bold; color: #ffffff;"
@@ -1800,17 +1812,17 @@ class Solver2048dGUI(QMainWindow):
                     warning_cells.add((r, c))
 
         return warning_cells
-        
+
     def update_board_display(self):
         grid = game_engine.board_to_list(self.current_board)
         mode = self.config.get('capture', {}).get('mode', 'level')
-        
+
         for r in range(4):
             for c in range(4):
                 level = grid[r][c]
                 btn = self.buttons[r][c]
                 has_capture_warning = (r, c) in self.capture_warning_cells
-                
+
                 # Set text based on level and capture mode
                 if level == 0:
                     display_text = ""
@@ -1828,20 +1840,20 @@ class Solver2048dGUI(QMainWindow):
                     display_text = f"{display_text} ⚠️" if display_text else "⚠️"
 
                 btn.setText(display_text)
-                    
+
                 # Set stylesheet
                 btn.setStyleSheet(self.get_tile_style(level, has_capture_warning))
-                
+
     def update_stats_display(self):
         self.score_val_label.setText(f"Score: {self.total_score}")
         self.energy_val_label.setText(f"Energy: {self.total_energy}")
         self.moves_val_label.setText(f"Moves: {self.total_moves}")
         efficiency = (self.total_score / self.total_energy) if self.total_energy > 0 else 0.0
         self.efficiency_val_label.setText(f"Pts/Energy: {efficiency:.2f}")
-        
+
     def update_gui_state_display(self):
         is_normal = (self.gui_state == "NORMAL")
-        
+
         # Toggle enabled state of action buttons
         if hasattr(self, 'btn_move_left'):
             self.btn_move_left.setEnabled(is_normal)
@@ -1849,7 +1861,7 @@ class Solver2048dGUI(QMainWindow):
             self.btn_move_down.setEnabled(is_normal)
             self.btn_move_right.setEnabled(is_normal)
             self.btn_apply_rec.setEnabled(is_normal and getattr(self, 'last_rec_move', None) is not None)
-            
+
         if self.gui_state == "WAITING_FOR_SPAWN":
             self.status_banner.setText("⚠️ WAITING FOR SPAWN: Click spawned tiles, then ENTER or Confirm Spawn")
             self.status_banner.setStyleSheet("""
@@ -1861,10 +1873,8 @@ class Solver2048dGUI(QMainWindow):
                 font-size: 13px;
             """)
             self.btn_confirm_spawn.setEnabled(True)
-            
+
             # Clear previous recommendation label but keep EV, EV Per Energy and Survival score visible
-            if hasattr(self, 'rec_dir_label'):
-                self.rec_dir_label.setText("Waiting for spawn input... 🕒")
             if hasattr(self, 'decision_badge'):
                 self.decision_badge.setText("WAITING FOR SPAWN")
                 self.decision_badge.setStyleSheet("background-color: #0d47a1; color: white; padding: 5px 15px; border-radius: 12px; font-weight: bold;")
@@ -1879,7 +1889,7 @@ class Solver2048dGUI(QMainWindow):
                 font-size: 13px;
             """)
             self.btn_confirm_spawn.setEnabled(False)
-            
+
     def refresh_stats(self):
         """Recalculates empirical statistics and displays them."""
         summary = stats.compute_spawn_statistics(self.config)
@@ -1896,14 +1906,14 @@ class Solver2048dGUI(QMainWindow):
             txt.append("  " + " | ".join(pat_strs))
         if summary['confidence_warning']:
             txt.append(f"⚠️ {summary['confidence_warning']}")
-            
+
         self.stats_text.setText("\n".join(txt))
-        
+
     def run_solver(self):
         """Runs expectimax evaluation on a background thread and updates GUI recommendations panel."""
         if self.gui_state == "WAITING_FOR_SPAWN":
             return # Don't solve when waiting for spawn input
-            
+
         # Cancel all active running threads before starting a new one.
         # Disconnect signals first so stale results don't leak in.
         # We do NOT block-wait here — instead we use a generation counter to discard stale results.
@@ -1916,11 +1926,11 @@ class Solver2048dGUI(QMainWindow):
                         t.solver_failed.disconnect()
                     except TypeError:
                         pass
-                    
+
         # Reset highlighted button styles at start of computation
         self.reset_action_button_styles()
         self.statusBar().showMessage("Solving... 🧠")
-        
+
         # Clear recommendation panel immediately so we never show stale data
         if hasattr(self, 'rec_dir_label'):
             self.rec_dir_label.setText("Solving... 🧠")
@@ -1936,13 +1946,13 @@ class Solver2048dGUI(QMainWindow):
         self.last_rec_move = None
         if hasattr(self, 'btn_apply_rec'):
             self.btn_apply_rec.setEnabled(False)
-        
+
         # Read parameters on the main thread
         selected_mode = self.mode_selector.currentData()
         override_depth = self.depth_selector.currentData() if hasattr(self, 'depth_selector') else None
         override_time = self.time_selector.currentData() if hasattr(self, 'time_selector') else None
         use_empirical = hasattr(self, 'chk_empirical_spawn') and self.chk_empirical_spawn.isChecked()
-        
+
         # Build dynamic enabled modes list based on user selections
         enabled_modes = ['x1', 'x4']
         if hasattr(self, 'chk_x8') and self.chk_x8.isChecked():
@@ -1951,27 +1961,27 @@ class Solver2048dGUI(QMainWindow):
             enabled_modes.append('x16')
         if selected_mode not in enabled_modes:
             enabled_modes.append(selected_mode)
-            
+
         self.selected_mode = selected_mode
         self.enabled_modes = enabled_modes
         self.current_search_results = {}
         self.completed_modes = set()
         self.solver_start_time = time.time()
-            
+
         # Increment generation counter — any result from an older generation is discarded
         self._solver_generation += 1
         current_generation = self._solver_generation
-        
+
         if hasattr(self, 'btn_solve'):
             self.btn_solve.setEnabled(False)
             self.btn_solve.setText("⏳ Solving...")
-            
+
         # Create a unique cancel filepath
         import uuid
         logs_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "logs")
         os.makedirs(logs_dir, exist_ok=True)
         cancel_filepath = os.path.join(logs_dir, f"cancel_{uuid.uuid4().hex}.tmp")
-            
+
         # Instantiate and start the thread
         thread = SolverThread(
             board=self.current_board,
@@ -2002,23 +2012,23 @@ class Solver2048dGUI(QMainWindow):
         """Handles an IPC progress event from one of the worker processes."""
         if generation != self._solver_generation:
             return
-            
+
         # Update aggregated results
         mode = event["mode"]
         depth = event["depth"]
         is_final = event["is_final"]
-        
+
         self.current_search_results.setdefault(mode, {})[depth] = event
         if is_final:
             self.completed_modes.add(mode)
-            
+
         # Build aggregated evaluation dict and display it
         evaluation = self.aggregate_and_build_eval()
         if evaluation is None:
             # Not enough data yet (waiting for all modes to complete depth 2)
             self.update_loading_reasons_box()
             return
-            
+
         elapsed_ms = (time.time() - self.solver_start_time) * 1000
         self._display_solver_result(evaluation, elapsed_ms, self.selected_mode, is_partial=True)
 
@@ -2030,12 +2040,12 @@ class Solver2048dGUI(QMainWindow):
             self.btn_solve.setEnabled(True)
             self.btn_solve.setText("Solve")
         self.statusBar().showMessage("Ready", 3000)
-        
+
         # Build final evaluation dict and display
         evaluation = self.aggregate_and_build_eval()
         if evaluation is None:
             return
-            
+
         elapsed_ms = (time.time() - self.solver_start_time) * 1000
         self._display_solver_result(evaluation, elapsed_ms, self.selected_mode, is_partial=False)
 
@@ -2049,7 +2059,7 @@ class Solver2048dGUI(QMainWindow):
 
     def aggregate_and_build_eval(self):
         """
-        Aggregates per-mode progress events. 
+        Aggregates per-mode progress events.
         Returns an evaluation dict evaluated at the highest common completed depth (fair_depth),
         while ensuring the selected mode's results in the evaluation dict are at that fair_depth.
         """
@@ -2058,14 +2068,14 @@ class Solver2048dGUI(QMainWindow):
         for m in self.enabled_modes:
             depths = self.current_search_results.get(m, {}).keys()
             max_completed_depths[m] = max(depths) if depths else 0
-            
+
         # Highest common completed depth among all enabled modes
         fair_depth = min(max_completed_depths.values()) if max_completed_depths else 0
-        
+
         # We need at least depth 2 for a valid comparison
         if fair_depth < 2:
             return None
-            
+
         # Get each mode's result at fair_depth
         results_at_fair_depth = {}
         for m in self.enabled_modes:
@@ -2075,7 +2085,7 @@ class Solver2048dGUI(QMainWindow):
                 best_move_int = DIR_MAP_FROM_STR.get(best_move_str) if best_move_str else None
                 m_vals = {DIR_MAP_FROM_STR[k]: v for k, v in res_event.get("move_values", {}).items() if k in DIR_MAP_FROM_STR}
                 m_real_vals = {DIR_MAP_FROM_STR[k]: v for k, v in res_event.get("move_real_values", {}).items() if k in DIR_MAP_FROM_STR}
-                
+
                 results_at_fair_depth[m] = {
                     'best_move': best_move_int,
                     'ev': res_event['real_ev'],
@@ -2088,13 +2098,13 @@ class Solver2048dGUI(QMainWindow):
                 }
             else:
                 results_at_fair_depth[m] = None
-                
+
         # Find best mode at fair_depth
         best_overall_mode = None
         best_overall_move = None
         best_overall_val_per_energy = -float('inf')
         survival_score = 0.0
-        
+
         for mode, res in results_at_fair_depth.items():
             if res is None:
                 continue
@@ -2104,12 +2114,12 @@ class Solver2048dGUI(QMainWindow):
                 best_overall_mode = mode
                 best_overall_move = res['best_move']
                 survival_score = (res['expected_empty'] / 16.0) * 100.0
-                
+
         # Calculate decision based on the best overall mode at fair_depth
         direct_conv = self.config['decision']['direct_conversion_value_per_energy']
         fresh_baseline = self.config['decision']['fresh_game_baseline_value_per_energy']
         has_any_move = any(res is not None for res in results_at_fair_depth.values())
-        
+
         if not has_any_move:
             decision = "GAME_OVER"
         elif best_overall_val_per_energy < direct_conv:
@@ -2118,18 +2128,18 @@ class Solver2048dGUI(QMainWindow):
             decision = "RESTART_GAME"
         else:
             decision = "CONTINUE"
-            
+
         # Headline recommendation must stay at fair-depth.
         # This means the selected mode's results in the evaluation dict are at fair_depth!
         selected_mode_results = results_at_fair_depth.get(self.selected_mode)
-        
+
         # Calculate total nodes searched across all modes at their latest completed depths
         total_nodes = 0
         for m in self.enabled_modes:
             m_max = max_completed_depths.get(m, 0)
             if m_max >= 2:
                 total_nodes += self.current_search_results[m][m_max].get("nodes", 0)
-                
+
         return {
             'best_mode': best_overall_mode,
             'best_move': best_overall_move,
@@ -2147,12 +2157,12 @@ class Solver2048dGUI(QMainWindow):
         """Displays initialization/progress in the reasons box before all modes complete depth 2."""
         report = []
         report.append("Per-Mode Progress:")
-        
+
         max_completed_depths = {}
         for m in self.enabled_modes:
             depths = self.current_search_results.get(m, {}).keys()
             max_completed_depths[m] = max(depths) if depths else 0
-            
+
         for m in self.enabled_modes:
             m_max_d = max_completed_depths.get(m, 0)
             is_finished = m in self.completed_modes
@@ -2169,7 +2179,7 @@ class Solver2048dGUI(QMainWindow):
         report.append("Global Fair Recommendation:")
         report.append("  ⌛ Waiting for all modes to complete depth 2...\n")
         report.append("=" * 45 + "\n")
-        
+
         self.reasons_box.setPlainText("\n".join(report))
         self.rec_dir_label.setText("⌛ Thinking...")
         self.decision_badge.setText("⌛ THINKING")
@@ -2185,7 +2195,7 @@ class Solver2048dGUI(QMainWindow):
         """Shared display logic for both partial (streaming) and final solver results."""
         try:
             mode_results = evaluation['results'].get(selected_mode)
-            
+
             if mode_results is None or mode_results['best_move'] is None:
                 if not is_partial:
                     # Only clear recommendation on final game-over result
@@ -2200,10 +2210,10 @@ class Solver2048dGUI(QMainWindow):
                     self.val_survival.setValue(0)
                     self.reasons_box.setPlainText("No valid moves exist on the board.")
                 return
-                
+
             best_move = mode_results['best_move']
             self.last_rec_move = best_move  # Allow apply-rec even on partial
-            
+
             # Highlight the recommended direction button and the Apply button
             highlight_style = "background-color: #311b92; border: 2px solid #d500f9; border-radius: 4px; padding: 5px 11px; font-weight: bold; color: #ffffff;"
             self.reset_action_button_styles()
@@ -2215,29 +2225,29 @@ class Solver2048dGUI(QMainWindow):
                 self.btn_move_down.setStyleSheet(highlight_style)
             elif best_move == game_engine.RIGHT:
                 self.btn_move_right.setStyleSheet(highlight_style)
-                
+
             if hasattr(self, 'btn_apply_rec'):
                 self.btn_apply_rec.setEnabled(self.gui_state == "NORMAL")
                 self.btn_apply_rec.setStyleSheet("background-color: #00796b; border: 2px solid #00e676; border-radius: 4px; padding: 5px 11px; font-weight: bold; color: #ffffff;")
-                
+
             ev = mode_results['ev']
             ev_per_energy = mode_results['ev_per_energy']
             move_values = mode_results['move_values']           # heuristic ranking scores
             move_real_values = mode_results.get('move_real_values', {})  # real expected pts
             decision = evaluation.get('decision', 'UNKNOWN')
-            
+
             # Decide label prefix and badge style based on partial vs final
             completed_depth = evaluation.get('completed_depth', 0)
             best_overall_mode = evaluation['best_mode']
             mode_rec_str = ""
-            
+
             if is_partial:
                 prefix = f"🔍 CURRENT BEST (d{completed_depth}):"
                 badge_prefix = "⌛ "
             else:
                 prefix = "✅ RECOMMEND:"
                 badge_prefix = ""
-            
+
             rec_text = f"{prefix} {DIR_STR[best_move]}"
             if best_overall_mode and best_overall_mode != selected_mode:
                 mode_rec_str = f"👉 Switch to {best_overall_mode.upper()} mode! (Higher EV/Energy: {evaluation['best_val_per_energy']:.2f})\n\n"
@@ -2250,13 +2260,13 @@ class Solver2048dGUI(QMainWindow):
                 self.decision_badge.setStyleSheet("background-color: #0d47a1; color: white; padding: 5px 15px; border-radius: 12px; font-weight: bold;")
             else:
                 self.rec_dir_label.setText(rec_text)
-                
+
                 # Decision Badge
                 badge_text = badge_prefix + decision.replace("_", " ")
                 if "RESTART" in decision or "CONVERT" in decision:
                     badge_text += " (EXPERIMENTAL)"
                 self.decision_badge.setText(badge_text)
-                
+
                 if is_partial:
                     # Amber pulsing style for in-progress
                     self.decision_badge.setStyleSheet(
@@ -2270,26 +2280,26 @@ class Solver2048dGUI(QMainWindow):
                     self.decision_badge.setStyleSheet("background-color: #c62828; color: white; padding: 5px 15px; border-radius: 12px; font-weight: bold;")
                 else:
                     self.decision_badge.setStyleSheet("background-color: #424242; color: white; padding: 5px 15px; border-radius: 12px; font-weight: bold;")
-            
+
             self.val_ev.setText(f"{ev:.2f} pts")
             self.val_ev_energy.setText(f"{ev_per_energy:.2f} pts/energy")
-            
+
             # Survival Score
             survival = evaluation['survival_score']
             self.val_survival.setValue(int(survival))
-                
+
             # Explain move reasons
             reasons = solver.explain_move(self.current_board, best_move, self.config)
-            
+
             # Calculate max completed depth for each enabled mode
             max_completed_depths = {}
             for m in self.enabled_modes:
                 depths = self.current_search_results.get(m, {}).keys()
                 max_completed_depths[m] = max(depths) if depths else 0
-                
+
             # Build report
             report = []
-            
+
             # 1. Per-mode progress section
             report.append("Per-Mode Progress:")
             for m in self.enabled_modes:
@@ -2305,7 +2315,7 @@ class Solver2048dGUI(QMainWindow):
                 else:
                     report.append(f"  ● {m.upper()}: initializing... [{status}]")
             report.append("")
-            
+
             # 2. Global fair recommendation section
             fair_depth = completed_depth  # In evaluation dict, completed_depth is fair_depth
             report.append(f"Global Fair Recommendation (at depth {fair_depth}):")
@@ -2315,16 +2325,16 @@ class Solver2048dGUI(QMainWindow):
                     report.append(f"  ● {m.upper()}: EV/Energy = {res_event['ev_per_energy']:.2f} (best {res_event['best_move']})")
                 else:
                     report.append(f"  ● {m.upper()}: N/A")
-            
+
             if best_overall_mode:
                 report.append(f"  🏆 Winner: {best_overall_mode.upper()} mode")
             report.append("")
-            
+
             if mode_rec_str:
                 report.append(mode_rec_str)
             if is_partial:
                 report.append(f"🔄 Searching deeper... (headline recommendation pinned at depth {fair_depth})")
-                
+
             # Prepend search stats
             node_count = evaluation.get('node_count', 0)
             status_line = f"Search Stats: Depth {fair_depth} | Nodes {node_count} | Time {elapsed_ms:.1f}ms"
@@ -2332,11 +2342,11 @@ class Solver2048dGUI(QMainWindow):
                 status_line += "  ⏳"
             report.append(status_line)
             report.append("=" * 45 + "\n")
-                
+
             report.append("Heuristic Rationale:")
             for r in reasons:
                 report.append(f" • {r}")
-                
+
             report.append("\nMove Comparison (ranked by heuristic search score):")
             energy_cost = self.config['modes'][selected_mode]['energy_cost']
             sorted_moves = sorted(move_values.items(), key=lambda x: x[1], reverse=True)
@@ -2352,11 +2362,11 @@ class Solver2048dGUI(QMainWindow):
                     )
                 else:
                     report.append(f"{pref}{DIR_STR[m]:<10}: HeuristicScore={heuristic_val:.0f}")
-            
+
             report.append(f"\n[RealEV = accumulated real merge+spawn pts across search tree]")
             report.append(f"[HeuristicScore = search ranking value; used for move ordering only]")
             self.reasons_box.setPlainText("\n".join(report))
-            
+
             # Only log to disk on the final (non-partial) result
             if not is_partial:
                 features = {
@@ -2374,7 +2384,7 @@ class Solver2048dGUI(QMainWindow):
                     features,
                     completed_depth
                 )
-            
+
         except Exception as e:
             traceback.print_exc()
             self.statusBar().showMessage(f"Solver Error: {str(e)}", 3000)
