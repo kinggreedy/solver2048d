@@ -1,5 +1,4 @@
 capture:
-  template_matching: false
   colors_level:
     0:
     - 46
@@ -55,58 +54,57 @@ capture:
     - 227
     - 196
     '1':
-    - 242
+    - 240
+    - 239
     - 238
-    - 236
     '10':
-    - 120
-    - 70
-    - 180
+    - 138
+    - 101
+    - 93
     '11':
-    - 110
-    - 60
-    - 190
-    '2':
-    - 213
-    - 208
-    - 139
-    '3':
-    - 171
-    - 214
-    - 158
-    '4':
-    - 159
-    - 197
-    - 171
-    '5':
-    - 166
-    - 188
-    - 202
-    '6':
-    - 167
+    - 161
+    - 123
     - 98
-    - 129
-    '7':
-    - 215
-    - 134
-    - 84
-    '8':
+    '2':
+    - 214
     - 209
-    - 104
-    - 80
-    '9':
+    - 141
+    '3':
+    - 162
+    - 202
+    - 147
+    '4':
+    - 165
+    - 181
+    - 165
+    '5':
+    - 165
+    - 174
+    - 181
+    '6':
+    - 171
+    - 122
+    - 142
+    '7':
     - 154
-    - 124
-    - 103
+    - 100
+    - 72
+    '8':
+    - 195
+    - 109
+    - 91
+    '9':
+    - 161
+    - 128
+    - 113
   crop_h: 770
   crop_w: 893
   crop_x: 65
   crop_y: 940
-  # Luminance threshold for center pixel: cells with center lum >= this are potential Level 0 (empty).
   empty_lum_threshold: 200
-  # Standard deviation threshold: cells with grayscale stddev < this are Level 0 (empty).
-  # Increased to 50.0 to handle shading gradients and noise in empty cells.
   empty_stddev_threshold: 50.0
   enabled: true
   mode: x
   port: 55781
+  template_match_policy: ambiguous
+  template_matching: true

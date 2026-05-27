@@ -29,6 +29,22 @@ X_LABEL_ROI = (0.18, 0.54, 0.86, 0.93)
 X_TEMPLATE_SIZE = (96, 48)
 X_TEMPLATE_MIN_PIXELS = 32
 X_TEMPLATE_MATCH_THRESHOLD = 0.40
+X_TEMPLATE_AMBIGUOUS_PAIRS = frozenset({
+    frozenset((4, 9)),
+    frozenset((8, 11)),
+})
+X_TEMPLATE_AMBIGUOUS_HIGH_LEVELS = frozenset({9, 10, 11})
+X_TEMPLATE_WEAK_LOW_LEVELS = frozenset({1, 2})
+
+def _ambiguous_template_levels(closest_lvl, method, score, max_weak_votes):
+    for pair in X_TEMPLATE_AMBIGUOUS_PAIRS:
+        if closest_lvl in pair:
+            return pair
+
+    if method == "PlateVotes" and closest_lvl in X_TEMPLATE_WEAK_LOW_LEVELS and score <= max_weak_votes:
+        return X_TEMPLATE_AMBIGUOUS_HIGH_LEVELS
+
+    return None
 
 def load_capture_config():
     """Loads configuration settings for screenshot capture."""
@@ -74,7 +90,7 @@ def _rgb_to_hsv(rgb):
     h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
     return h * 360.0, s, v
 
-def _classify_x_plate_sample(rgb, refs):
+def _classify_x_plate_sample(rgb, refs=None):
     """Classifies one x-mode plate sample into a level vote, or None to ignore."""
     if _is_debug_grid_pixel(rgb):
         return None
@@ -85,25 +101,29 @@ def _classify_x_plate_sample(rgb, refs):
     if 32 <= hue <= 46 and sat <= 0.27 and val >= 0.80:
         return None
 
+    # White/gray dish pixels belong to x2. Other levels are saturated enough to
+    # be caught by the hue bands below.
+    if sat <= 0.12 and val >= 0.68:
+        return 1
+
     # Dark outlines/shadows should not vote.
     if val < 0.50:
         return None
 
-    # Find the nearest color level from refs (levels 1-11)
-    min_dist = float('inf')
-    closest_lvl = None
-    for lvl in range(1, 12):
-        if lvl in refs:
-            ref = refs[lvl]
-            dist = (rgb[0] - ref[0])**2 + (rgb[1] - ref[1])**2 + (rgb[2] - ref[2])**2
-            if dist < min_dist:
-                min_dist = dist
-                closest_lvl = lvl
+    if 50 <= hue <= 70 and sat >= 0.24 and val >= 0.55:
+        return 2
+    if 85 <= hue <= 125 and sat >= 0.16 and val >= 0.50:
+        return 3
+    if 135 <= hue <= 175 and sat >= 0.16 and val >= 0.50:
+        return 4
+    if 185 <= hue <= 215 and sat >= 0.12 and val >= 0.50:
+        return 5
+    if 275 <= hue <= 325 and sat >= 0.14 and val >= 0.55:
+        return 6
+    if 15 <= hue <= 32 and sat >= 0.45 and val >= 0.75:
+        return 7
 
-    if min_dist > 2500:
-        return None
-
-    return closest_lvl
+    return None
 
 def _nearest_color_level(rgb, color_map, include_empty=True):
     min_dist = float('inf')
@@ -127,10 +147,14 @@ def _x_reference_colors(color_map):
 def _classify_x_cell(rgb_img, cell_left_px, cell_top_px, cell_right_px, cell_bottom_px,
                      center_lum, stddev_gray, empty_lum_threshold, empty_stddev_threshold,
                      color_map):
+    label_mask = None
     if center_lum >= empty_lum_threshold and stddev_gray < empty_stddev_threshold:
-        center_x = (cell_left_px + cell_right_px) // 2
-        center_y = (cell_top_px + cell_bottom_px) // 2
-        return 0, rgb_img.getpixel((center_x, center_y)), "Empty", 0
+        cell_img = rgb_img.crop((cell_left_px, cell_top_px, cell_right_px, cell_bottom_px))
+        label_mask = _x_label_mask(cell_img)
+        if label_mask is None:
+            center_x = (cell_left_px + cell_right_px) // 2
+            center_y = (cell_top_px + cell_bottom_px) // 2
+            return 0, rgb_img.getpixel((center_x, center_y)), "Empty", 0, None
 
     cell_w_px = cell_right_px - cell_left_px
     cell_h_px = cell_bottom_px - cell_top_px
@@ -139,7 +163,7 @@ def _classify_x_cell(rgb_img, cell_left_px, cell_top_px, cell_right_px, cell_bot
     # Get active reference colors prioritizing color_map
     refs = _x_reference_colors(color_map)
 
-    votes = {lvl: 0 for lvl in range(1, 12)}
+    votes = {lvl: 0 for lvl in range(1, 8)}
     voted_samples = {}
 
     for fx, fy in X_PLATE_SAMPLE_POINTS:
@@ -174,7 +198,7 @@ def _classify_x_cell(rgb_img, cell_left_px, cell_top_px, cell_right_px, cell_bot
             sampled_rgb = tuple(sum(rgb[channel] for rgb in samples) // len(samples) for channel in range(3))
         else:
             sampled_rgb = refs.get(closest_lvl, (0, 0, 0))
-        return closest_lvl, sampled_rgb, "PlateVotes", best_votes
+        return closest_lvl, sampled_rgb, "PlateVotes", best_votes, label_mask
 
     # Fallback for future/unseen dish colors: use the old lower-middle color
     # sample, but compare against corrected x-mode references.
@@ -187,7 +211,7 @@ def _classify_x_cell(rgb_img, cell_left_px, cell_top_px, cell_right_px, cell_bot
 
     sampled_rgb = tuple(int(statistics.median(rgb[channel] for rgb in dish_pixels)) for channel in range(3))
     closest_lvl, min_dist = _nearest_color_level(sampled_rgb, refs, include_empty=False)
-    return closest_lvl, sampled_rgb, "ColorFallback", int(min_dist)
+    return closest_lvl, sampled_rgb, "ColorFallback", int(min_dist), label_mask
 
 def _template_dir(cfg):
     from src.paths import LOGS_DIR
@@ -222,16 +246,32 @@ def _x_label_mask(cell_img):
     label_w, label_h = label_img.size
 
     mask = Image.new("L", (label_w, label_h), 0)
-    mask_pixels = mask.load()
+    mask_data = bytearray(label_w * label_h)
     active = []
-    for y in range(label_h):
-        for x in range(label_w):
-            if _is_x_label_pixel(label_img.getpixel((x, y))):
-                mask_pixels[x, y] = 255
-                active.append((x, y))
+    label_data = label_img.tobytes()
+    for idx in range(0, len(label_data), 3):
+        r = label_data[idx]
+        g = label_data[idx + 1]
+        b = label_data[idx + 2]
+        if r > 220 and g < 90 and b < 90:
+            continue
+
+        hue, sat, val = _rgb_to_hsv((r, g, b))
+
+        is_label = (
+            35 <= hue <= 62 and sat >= 0.35 and val >= 0.55 and r >= 140 and g >= 105 and b <= 135
+        ) or (
+            15 <= hue <= 45 and sat >= 0.35 and 0.25 <= val <= 0.82 and r >= 65 and g >= 35 and b <= 135
+        )
+        if is_label:
+            mask_idx = idx // 3
+            mask_data[mask_idx] = 255
+            active.append((mask_idx % label_w, mask_idx // label_w))
 
     if len(active) < X_TEMPLATE_MIN_PIXELS:
         return None
+
+    mask.frombytes(bytes(mask_data))
 
     min_x = max(0, min(x for x, _ in active) - 4)
     max_x = min(label_w - 1, max(x for x, _ in active) + 4)
@@ -351,18 +391,27 @@ def _load_x_templates(cfg):
 
     return templates
 
-def _match_x_template(cell_img, templates_by_level, threshold):
+def _match_x_template(cell_img, templates_by_level, threshold, mask=None, candidate_levels=None):
     if not templates_by_level:
         return None, 0.0
 
-    mask = _x_label_mask(cell_img)
+    if mask is None:
+        mask = _x_label_mask(cell_img)
     if mask is None:
         return None, 0.0
 
     data = mask.tobytes()
     best_lvl = None
     best_score = 0.0
-    for lvl, templates in templates_by_level.items():
+    if candidate_levels is None:
+        template_items = templates_by_level.items()
+    else:
+        template_items = (
+            (lvl, templates_by_level[lvl])
+            for lvl in candidate_levels
+            if lvl in templates_by_level
+        )
+    for lvl, templates in template_items:
         for template_data in templates:
             score = _mask_similarity(data, template_data)
             if score > best_score:
@@ -471,6 +520,9 @@ def parse_screenshot(image_path):
     cfg = load_capture_config()
     
     template_matching_enabled = bool(cfg.get('template_matching', False))
+    debug_parser = bool(cfg.get('debug_parser', False))
+    template_match_policy = cfg.get('template_match_policy', 'dominant')
+    template_ambiguous_max_plate_votes = int(cfg.get('template_ambiguous_max_plate_votes', 3))
     template_root = _template_dir(cfg)
     template_threshold = float(cfg.get('template_match_threshold', X_TEMPLATE_MATCH_THRESHOLD))
     templates_by_level = _load_x_templates(cfg) if template_matching_enabled else {}
@@ -490,28 +542,29 @@ def parse_screenshot(image_path):
     board_img = img.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
     rgb_img = board_img.convert("RGB")
     
-    # Save a debug cropped image with grid overlay for alignment verification
-    try:
-        from PIL import ImageDraw
-        from src.paths import LOGS_DIR
-        debug_img = board_img.copy()
-        draw = ImageDraw.Draw(debug_img)
-        # Draw 4x4 cell grid lines
-        for i in range(1, 4):
-            # Vertical lines
-            vx = int(i * (crop_w / 4))
-            draw.line([(vx, 0), (vx, crop_h)], fill=(255, 0, 0), width=3)
-            # Horizontal lines
-            vy = int(i * (crop_h / 4))
-            draw.line([(0, vy), (crop_w, vy)], fill=(255, 0, 0), width=3)
-        # Draw borders
-        draw.rectangle([(0, 0), (crop_w - 1, crop_h - 1)], outline=(255, 0, 0), width=4)
-        
-        debug_path = os.path.join(LOGS_DIR, "debug_cropped.png")
-        debug_img.save(debug_path)
-        print(f"Saved crop debug image to {debug_path}")
-    except Exception as e:
-        print(f"Error saving debug_cropped.png: {e}")
+    if debug_parser:
+        # Save a debug cropped image with grid overlay for alignment verification
+        try:
+            from PIL import ImageDraw
+            from src.paths import LOGS_DIR
+            debug_img = board_img.copy()
+            draw = ImageDraw.Draw(debug_img)
+            # Draw 4x4 cell grid lines
+            for i in range(1, 4):
+                # Vertical lines
+                vx = int(i * (crop_w / 4))
+                draw.line([(vx, 0), (vx, crop_h)], fill=(255, 0, 0), width=3)
+                # Horizontal lines
+                vy = int(i * (crop_h / 4))
+                draw.line([(0, vy), (crop_w, vy)], fill=(255, 0, 0), width=3)
+            # Draw borders
+            draw.rectangle([(0, 0), (crop_w - 1, crop_h - 1)], outline=(255, 0, 0), width=4)
+            
+            debug_path = os.path.join(LOGS_DIR, "debug_cropped.png")
+            debug_img.save(debug_path)
+            print(f"Saved crop debug image to {debug_path}")
+        except Exception as e:
+            print(f"Error saving debug_cropped.png: {e}")
         
     cell_w = crop_w / 4
     cell_h = crop_h / 4
@@ -565,7 +618,8 @@ def parse_screenshot(image_path):
         
     grid = [[0 for _ in range(4)] for _ in range(4)]
     
-    print("\n--- Board Image Classification Details ---")
+    if debug_parser:
+        print("\n--- Board Image Classification Details ---")
     for r in range(4):
         row_debug = []
         for c in range(4):
@@ -602,7 +656,7 @@ def parse_screenshot(image_path):
                 avg_r_c, avg_g_c, avg_b_c = sorted_r[mid], sorted_g[mid], sorted_b[mid]
                 center_lum = int(0.299 * avg_r_c + 0.587 * avg_g_c + 0.114 * avg_b_c)
 
-                closest_lvl, sampled_rgb, method, min_dist = _classify_x_cell(
+                closest_lvl, sampled_rgb, method, min_dist, label_mask = _classify_x_cell(
                     rgb_img,
                     cell_left_px,
                     cell_top_px,
@@ -616,21 +670,43 @@ def parse_screenshot(image_path):
                 )
 
                 if template_matching_enabled and closest_lvl > 0:
-                    template_lvl, template_score = _match_x_template(
-                        cell_crop.convert("RGB"),
-                        templates_by_level,
-                        template_threshold,
-                    )
+                    candidate_template_levels = None
+                    if template_match_policy == 'ambiguous':
+                        candidate_template_levels = _ambiguous_template_levels(
+                            closest_lvl,
+                            method,
+                            min_dist,
+                            template_ambiguous_max_plate_votes,
+                        )
+
+                    template_lvl = None
+                    template_score = 0.0
+                    if template_match_policy == 'dominant' or candidate_template_levels:
+                        template_lvl, template_score = _match_x_template(
+                            cell_crop.convert("RGB"),
+                            templates_by_level,
+                            template_threshold,
+                            label_mask,
+                            candidate_template_levels,
+                        )
                     if template_lvl is not None:
-                        # If the color path found a level that has no templates yet,
-                        # trust color and collect that missing class instead of forcing
-                        # a nearest-neighbor template from some other level.
-                        if template_lvl == closest_lvl or closest_lvl in templates_by_level:
+                        template_pair = frozenset((closest_lvl, template_lvl))
+                        weak_ambiguous_vote = (
+                            template_match_policy == 'ambiguous'
+                            and template_lvl in X_TEMPLATE_AMBIGUOUS_HIGH_LEVELS
+                            and method == "PlateVotes"
+                            and min_dist <= template_ambiguous_max_plate_votes
+                        )
+                        if (
+                            template_match_policy == 'dominant'
+                            or template_pair in X_TEMPLATE_AMBIGUOUS_PAIRS
+                            or weak_ambiguous_vote
+                        ):
                             closest_lvl = template_lvl
                             method = "Template"
                             min_dist = template_score
-                        else:
-                            method = "PlateVotes+TemplateUnseeded"
+                        elif template_match_policy == 'ambiguous':
+                            method = "PlateVotes+TemplateIgnored"
 
                 lum_info = f"Lum={center_lum} Std={stddev_gray:.1f}"
 
@@ -662,25 +738,28 @@ def parse_screenshot(image_path):
 
             grid[r][c] = closest_lvl
             
-            if method == "Template":
-                metric_label = "sim"
-                metric_value = f"{min_dist:.3f}"
-            elif method.startswith("PlateVotes"):
-                metric_label = "score"
-                metric_value = str(int(min_dist))
-            else:
-                metric_label = "dist"
-                metric_value = str(int(min_dist))
-            row_debug.append(
-                f"({r},{c}): cRGB={sampled_rgb} {lum_info} "
-                f"-> Lvl {closest_lvl} [{method}] ({metric_label}={metric_value})"
-            )
+            if debug_parser:
+                if method == "Template":
+                    metric_label = "sim"
+                    metric_value = f"{min_dist:.3f}"
+                elif method.startswith("PlateVotes"):
+                    metric_label = "score"
+                    metric_value = str(int(min_dist))
+                else:
+                    metric_label = "dist"
+                    metric_value = str(int(min_dist))
+                row_debug.append(
+                    f"({r},{c}): cRGB={sampled_rgb} {lum_info} "
+                    f"-> Lvl {closest_lvl} [{method}] ({metric_label}={metric_value})"
+                )
             
-        print(" | ".join(row_debug))
+        if debug_parser:
+            print(" | ".join(row_debug))
         
-    print("\nParsed Level Grid:")
-    for r in range(4):
-        print(f"  {grid[r]}")
-    print("------------------------------------------")
+    if debug_parser:
+        print("\nParsed Level Grid:")
+        for r in range(4):
+            print(f"  {grid[r]}")
+        print("------------------------------------------")
     
     return grid

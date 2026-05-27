@@ -3,6 +3,7 @@ import unittest
 import os
 import sys
 import json
+import tempfile
 from PIL import Image
 
 # Add src to path
@@ -59,16 +60,41 @@ class TestImageParser(unittest.TestCase):
             except Exception as e:
                 print(f"Error loading dynamic samples: {e}")
 
-    def test_all_samples(self):
+    def _configure_sample(self, sample, img_path, template_matching=False, template_dir=None,
+                          template_match_policy="dominant"):
+        with Image.open(img_path) as img:
+            w, h = img.size
+
+        self.config['capture']['crop_x'] = 0
+        self.config['capture']['crop_y'] = 0
+        self.config['capture']['crop_w'] = w
+        self.config['capture']['crop_h'] = h
+
+        # Keep high-level calibrated colors from the capture config, but pin the
+        # canonical low-level palette so tests are stable across local machines.
+        from src.image_parser import X_CANONICAL_COLORS
+        test_colors = self.config['capture'].get('colors_x', {}).copy()
+        for k, v in X_CANONICAL_COLORS.items():
+            test_colors[str(k)] = list(v)
+        self.config['capture']['colors_x'] = test_colors
+
+        self.config['capture']['mode'] = sample.get("mode", "x")
+        self.config['capture']['template_matching'] = template_matching
+        self.config['capture']['template_match_policy'] = template_match_policy
+        if template_dir is not None:
+            self.config['capture']['template_dir'] = template_dir
+
+    def _run_samples(self, samples, label, template_matching=False, template_dir=None,
+                     template_match_policy="dominant"):
         tests_dir = os.path.dirname(__file__)
         results = []
         failed_samples = []
-        
+
         print("\n" + "="*50)
-        print("IMAGE PARSER VALIDATION REPORT")
+        print(f"IMAGE PARSER VALIDATION REPORT: {label}")
         print("="*50)
 
-        for sample in self.samples:
+        for sample in samples:
             img_path = os.path.join(tests_dir, sample["name"])
             if not os.path.exists(img_path):
                 print(f"\n❌ {sample['name']}: file not found!")
@@ -76,54 +102,32 @@ class TestImageParser(unittest.TestCase):
                 failed_samples.append(f"{sample['name']}: file not found")
                 continue
 
-            # Mock crop settings for the test board
-            with Image.open(img_path) as img:
-                w, h = img.size
             orig_crop = self.config['capture'].copy()
-            
             try:
-                self.config['capture']['crop_x'] = 0
-                self.config['capture']['crop_y'] = 0
-                self.config['capture']['crop_w'] = w
-                self.config['capture']['crop_h'] = h
-                
-                # Override colors_x with canonical colors to ensure tests pass
-                # regardless of local color calibration state in config.yaml,
-                # but keep high levels 8-11 from config.
-                from src.image_parser import X_CANONICAL_COLORS
-                test_colors = {}
-                if 'colors_x' in orig_crop:
-                    test_colors = orig_crop['colors_x'].copy()
-                for k, v in X_CANONICAL_COLORS.items():
-                    test_colors[str(k)] = list(v)
-                self.config['capture']['colors_x'] = test_colors
-                
-                # Mock mode if specified in test case
-                if "mode" in sample:
-                    self.config['capture']['mode'] = sample["mode"]
-                self.config['capture']['template_matching'] = sample.get("template_matching", False)
-                
+                self._configure_sample(
+                    sample,
+                    img_path,
+                    template_matching,
+                    template_dir,
+                    template_match_policy,
+                )
+
                 import time
                 start_time = time.perf_counter()
                 parsed_grid = image_parser.parse_screenshot(img_path)
-                end_time = time.perf_counter()
-                elapsed_ms = (end_time - start_time) * 1000
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
 
                 gt = sample["ground_truth"]
-                
-                board_match = True
                 mismatches = []
                 if parsed_grid is None:
-                    board_match = False
                     mismatches.append("parser returned None")
                 else:
                     for r in range(4):
                         for c in range(4):
                             if parsed_grid[r][c] != gt[r][c]:
-                                board_match = False
                                 mismatches.append(f"({r},{c}): expected {gt[r][c]}, got {parsed_grid[r][c]}")
 
-                if board_match:
+                if not mismatches:
                     print(f"\n✅ {sample['name']}: perfect match! ({elapsed_ms:.1f} ms)")
                     results.append(True)
                 else:
@@ -132,7 +136,6 @@ class TestImageParser(unittest.TestCase):
                         print(f"   - {m}")
                     results.append(False)
                     failed_samples.append(f"{sample['name']}: " + "; ".join(mismatches))
-                    
             finally:
                 self.config['capture'] = orig_crop
 
@@ -142,6 +145,68 @@ class TestImageParser(unittest.TestCase):
         print(f"SUMMARY: {passed}/{total} boards passed.")
         print("="*50 + "\n")
         self.assertEqual(passed, total, "\n".join(failed_samples))
+
+    def test_color_palette_samples(self):
+        color_samples = [
+            sample for sample in self.samples
+            if max(max(row) for row in sample["ground_truth"]) <= 8
+        ]
+        self._run_samples(color_samples, "color palette", template_matching=False)
+
+    def test_template_matching_samples(self):
+        tests_dir = os.path.dirname(__file__)
+        with tempfile.TemporaryDirectory(prefix="solver2048d_templates_") as template_dir:
+            orig_crop = self.config['capture'].copy()
+            try:
+                for sample in self.samples:
+                    if sample.get("mode", "x") != "x":
+                        continue
+                    img_path = os.path.join(tests_dir, sample["name"])
+                    if not os.path.exists(img_path):
+                        continue
+                    self._configure_sample(sample, img_path, template_matching=False, template_dir=template_dir)
+                    image_parser.collect_x_template_samples(
+                        img_path,
+                        sample["ground_truth"],
+                        self.config['capture'],
+                    )
+            finally:
+                self.config['capture'] = orig_crop
+
+            self._run_samples(
+                self.samples,
+                "template matching",
+                template_matching=True,
+                template_dir=template_dir,
+            )
+
+    def test_mixed_ambiguous_template_samples(self):
+        tests_dir = os.path.dirname(__file__)
+        with tempfile.TemporaryDirectory(prefix="solver2048d_templates_") as template_dir:
+            orig_crop = self.config['capture'].copy()
+            try:
+                for sample in self.samples:
+                    if sample.get("mode", "x") != "x":
+                        continue
+                    img_path = os.path.join(tests_dir, sample["name"])
+                    if not os.path.exists(img_path):
+                        continue
+                    self._configure_sample(sample, img_path, template_matching=False, template_dir=template_dir)
+                    image_parser.collect_x_template_samples(
+                        img_path,
+                        sample["ground_truth"],
+                        self.config['capture'],
+                    )
+            finally:
+                self.config['capture'] = orig_crop
+
+            self._run_samples(
+                self.samples,
+                "mixed ambiguous template",
+                template_matching=True,
+                template_dir=template_dir,
+                template_match_policy="ambiguous",
+            )
 
 if __name__ == "__main__":
     unittest.main()

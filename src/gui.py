@@ -755,10 +755,12 @@ class Solver2048dGUI(QMainWindow):
         self.chk_show_grid.stateChanged.connect(self.update_screenshot_display)
         row1_layout.addWidget(self.chk_show_grid)
 
-        self.chk_template_matching = QCheckBox("Template Matching")
-        self.chk_template_matching.setChecked(capture_cfg.get('template_matching', False))
-        self.chk_template_matching.stateChanged.connect(self.handle_template_matching_changed)
-        row1_layout.addWidget(self.chk_template_matching)
+        self.parser_strategy = self._parser_strategy_from_config(capture_cfg)
+        self.btn_parser_strategy = QPushButton()
+        self.btn_parser_strategy.setFixedHeight(24)
+        self.btn_parser_strategy.clicked.connect(self.handle_parser_strategy_changed)
+        self._update_parser_strategy_button()
+        row1_layout.addWidget(self.btn_parser_strategy)
 
         self.chk_auto_apply = QCheckBox("⚡ Auto Apply")
         self.chk_auto_apply.setChecked(capture_cfg.get('auto_apply', False))
@@ -883,11 +885,65 @@ class Solver2048dGUI(QMainWindow):
         if getattr(self, 'latest_screenshot_path', None) and os.path.exists(self.latest_screenshot_path):
             self.reparse_current_screenshot()
 
-    def handle_template_matching_changed(self):
-        """Fires when the Template Matching checkbox is toggled."""
+    def _parser_strategy_from_config(self, capture_cfg):
+        if 'template_matching' not in capture_cfg and 'template_match_policy' not in capture_cfg:
+            return 'adaptive'
+        if not capture_cfg.get('template_matching', False):
+            return 'color'
+        if capture_cfg.get('template_match_policy') == 'ambiguous':
+            return 'adaptive'
+        return 'template'
+
+    def _update_parser_strategy_button(self):
+        labels = {
+            'color': "Parser: Color",
+            'template': "Parser: Template",
+            'adaptive': "Parser: Adaptive",
+        }
+        colors = {
+            'color': ("#2f5f8f", "#3f7fba"),
+            'template': ("#8a5a12", "#b7791f"),
+            'adaptive': ("#00796b", "#26a69a"),
+        }
+        bg, border = colors.get(self.parser_strategy, colors['adaptive'])
+        self.btn_parser_strategy.setText(labels.get(self.parser_strategy, labels['adaptive']))
+        self.btn_parser_strategy.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {bg};
+                border: 1px solid {border};
+                color: white;
+                padding: 3px 10px;
+                border-radius: 3px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {border};
+            }}
+            """
+        )
+
+    def _apply_parser_strategy_to_config(self):
         if 'capture' not in self.config:
             self.config['capture'] = {}
-        self.config['capture']['template_matching'] = self.chk_template_matching.isChecked()
+
+        if self.parser_strategy == 'color':
+            self.config['capture']['template_matching'] = False
+            self.config['capture']['template_match_policy'] = 'dominant'
+        elif self.parser_strategy == 'adaptive':
+            self.config['capture']['template_matching'] = True
+            self.config['capture']['template_match_policy'] = 'ambiguous'
+        else:
+            self.config['capture']['template_matching'] = True
+            self.config['capture']['template_match_policy'] = 'dominant'
+
+    def handle_parser_strategy_changed(self, *_args):
+        """Cycles parser strategy: Adaptive -> Color -> Template -> Adaptive."""
+        order = ('adaptive', 'color', 'template')
+        idx = order.index(self.parser_strategy) if self.parser_strategy in order else 0
+        self.parser_strategy = order[(idx + 1) % len(order)]
+        self._update_parser_strategy_button()
+        self._apply_parser_strategy_to_config()
 
     def handle_auto_apply_changed(self):
         """Fires when the Auto Apply checkbox is toggled."""
@@ -1036,8 +1092,10 @@ class Solver2048dGUI(QMainWindow):
             index = self.cmb_capture_mode.currentIndex()
             yaml_data['capture']['mode'] = 'x' if index == 1 else 'level'
             
-            # Save the template matching setting
-            yaml_data['capture']['template_matching'] = self.chk_template_matching.isChecked()
+            # Save the parser strategy setting
+            self._apply_parser_strategy_to_config()
+            yaml_data['capture']['template_matching'] = self.config['capture'].get('template_matching', False)
+            yaml_data['capture']['template_match_policy'] = self.config['capture'].get('template_match_policy', 'dominant')
             
             # Save the auto apply setting
             yaml_data['capture']['auto_apply'] = self.chk_auto_apply.isChecked()
@@ -1079,10 +1137,26 @@ class Solver2048dGUI(QMainWindow):
             from src import game_engine as ge
             from src import image_parser
 
+            self._apply_parser_strategy_to_config()
             cfg = self.config.get('capture', {})
+            parser_strategy = getattr(self, 'parser_strategy', self._parser_strategy_from_config(cfg))
             mode = cfg.get('mode', 'level')
             if mode != 'x':
                 self.statusBar().showMessage("Calibrate Colors is only supported in 'x' mode.", 3000)
+                return
+
+            if parser_strategy == 'template':
+                template_samples_saved = image_parser.collect_x_template_samples(
+                    self.latest_screenshot_path,
+                    ge.board_to_list(self.current_board),
+                    cfg,
+                )
+                summary = f"Collected {template_samples_saved} template sample(s) from the confirmed board."
+                print(summary)
+                QMessageBox.information(self, "Template Calibration Done", summary)
+                self.statusBar().showMessage(
+                    f"Template calibration saved {template_samples_saved} sample(s).", 4000
+                )
                 return
 
             crop_x = cfg.get('crop_x', 65)
@@ -1159,7 +1233,7 @@ class Solver2048dGUI(QMainWindow):
             self.config.setdefault('capture', {})['colors_x'] = {int(k): list(v) for k, v in merged.items()}
 
             template_samples_saved = 0
-            if cfg.get('template_matching', False):
+            if parser_strategy == 'adaptive':
                 template_samples_saved = image_parser.collect_x_template_samples(
                     self.latest_screenshot_path,
                     ge.board_to_list(self.current_board),
