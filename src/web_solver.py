@@ -1,6 +1,7 @@
 import sys
 import json
 import time
+import math
 from src.game_engine import (
     list_to_board,
     board_to_list,
@@ -14,53 +15,97 @@ from src.solver import evaluate_board_options, explain_move
 # Global config that can be updated from JS
 current_config = default_config.copy()
 
+def sanitize_floats(obj):
+    """Recursively converts NaN and Infinity to None for JSON compliance."""
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    elif isinstance(obj, dict):
+        return {k: sanitize_floats(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_floats(x) for x in obj]
+    return obj
+
 def update_config(new_config_json):
     global current_config
     new_cfg = json.loads(new_config_json)
-    # Deep merge or replace
     current_config.update(new_cfg)
-    # Re-initialize engine tables in case stone level or merge points changed
     init_tables()
     return json.dumps({"status": "ok"})
 
 def solve(grid_json, mode="x1", depth=None, time_limit_ms=None, enabled_modes_json=None, progress_fn=None):
-    # This is now the "One-Shot" or "Fixed-Step" entry point
     try:
         grid = json.loads(grid_json)
         board = list_to_board(grid)
-        enabled_modes = json.loads(enabled_modes_json) if enabled_modes_json else [mode]
         
         start_time = time.time()
         DIR_MAP = {0: "LEFT", 1: "RIGHT", 2: "UP", 3: "DOWN"}
 
-        # We now use the standard solver's evaluate_board_options but we 
-        # can call it with a fixed depth to prevent internal looping if needed.
-        # However, to support multi-mode comparison (X1 vs X4) at a specific depth:
-        from src.solver import evaluate_board_options
+        def _on_depth_complete(bm, br, be, mv, mrv, d, nc):
+            if progress_fn:
+                try:
+                    energy_cost = current_config['modes'][mode]['energy_cost']
+                    
+                    mode_res = {
+                        'best_move': bm,
+                        'best_move_str': DIR_MAP.get(bm),
+                        'ev': br,
+                        'ev_per_energy': br / energy_cost,
+                        'expected_empty': be,
+                        'move_values': mv,
+                        'move_real_values': mrv,
+                        'move_real_values_str': {DIR_MAP[mv_i]: v for mv_i, v in mrv.items()},
+                        'completed_depth': d,
+                        'node_count': nc
+                    }
+                    
+                    from src.solver import _build_eval_dict
+                    eval_dict = _build_eval_dict({mode: mode_res}, current_config)
+                    eval_dict['best_move_str'] = DIR_MAP.get(eval_dict.get('best_move'))
+                    eval_dict['explanation'] = explain_move(board, bm, current_config)
+                    
+                    elapsed = (time.time() - start_time) * 1000
+                    sanitized = sanitize_floats(eval_dict)
+                    progress_fn(json.dumps(sanitized), elapsed)
+                except Exception as e:
+                    print(f"Error in progress callback: {e}")
+
+        from src.solver import get_best_move
         
-        # We pass override_time_ms=0 to force sequential evaluation of modes
-        # at the exact provided depth.
-        eval_dict = evaluate_board_options(
+        best_move, ev, expected_empty, move_values, move_real_values, completed_depth, node_count = get_best_move(
             board, 
+            mode, 
             current_config, 
-            enabled_modes=enabled_modes,
+            spawn_patterns=None, 
             override_depth=depth, 
-            override_time_ms=0 # Force fixed depth, no time-based deepening
+            override_time_ms=time_limit_ms,
+            on_depth_complete=_on_depth_complete
         )
         
-        # Map moves to strings for JS
-        if 'best_move' in eval_dict and eval_dict['best_move'] is not None:
-            eval_dict['best_move_str'] = DIR_MAP.get(eval_dict['best_move'])
+        # Final result
+        energy_cost = current_config['modes'][mode]['energy_cost']
+        mode_res = {
+            'best_move': best_move,
+            'best_move_str': DIR_MAP.get(best_move),
+            'ev': ev,
+            'ev_per_energy': ev / energy_cost if best_move is not None else 0.0,
+            'expected_empty': expected_empty,
+            'move_values': move_values,
+            'move_real_values': move_real_values,
+            'move_real_values_str': {DIR_MAP[mv_i]: v for mv_i, v in move_real_values.items()},
+            'completed_depth': completed_depth,
+            'node_count': node_count
+        }
         
-        for m, res in eval_dict.get('results', {}).items():
-            if res and 'best_move' in res and res['best_move'] is not None:
-                res['best_move_str'] = DIR_MAP.get(res['best_move'])
-                res['move_real_values_str'] = {DIR_MAP[mv_i]: v for mv_i, v in res.get('move_real_values', {}).items()}
-
-        eval_dict['explanation'] = explain_move(board, eval_dict.get('best_move'), current_config) if eval_dict.get('best_move') is not None else []
-        eval_dict['elapsed_ms'] = (time.time() - start_time) * 1000
+        from src.solver import _build_eval_dict
+        final_eval = _build_eval_dict({mode: mode_res}, current_config)
+        final_eval['best_move_str'] = DIR_MAP.get(final_eval.get('best_move'))
+        final_eval['explanation'] = explain_move(board, best_move, current_config) if best_move is not None else []
+        final_eval['elapsed_ms'] = (time.time() - start_time) * 1000
         
-        return json.dumps(eval_dict)
+        sanitized = sanitize_floats(final_eval)
+        return json.dumps(sanitized)
     except Exception as e:
         import traceback
         return json.dumps({"error": str(e), "traceback": traceback.format_exc()})

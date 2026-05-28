@@ -353,12 +353,14 @@ class App {
         if (this.worker) this.worker.terminate();
         this.isSolving = false;
         
+        // Update UI to show maintenance state
         this.recDirEl.textContent = "⚙️ Restarting Engine...";
         this.statusBanner.textContent = "INTERRUPTING: Refreshing Python Runtime...";
         this.statusBanner.style.backgroundColor = "#4527a0"; 
         
         this.needsReSolve = true;
         await this.initWorker();
+        this.updateUIState(); // Reset banner to Normal/Waiting state
     }
 
     triggerSolve(delay = 250) {
