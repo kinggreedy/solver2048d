@@ -8,11 +8,15 @@ class App {
         this.history = [];
         this.worker = null;
         this.isSolving = false;
+        this.needsReSolve = false;
+        this.workerReady = false;
+        this.solveDebounceTimeout = null;
+        this.hardKillTimeout = null;
+        this.currentSolveId = 0;
+        this.cachedFileContents = null;
         
         // Game states matching Qt
         this.guiState = "NORMAL"; // "NORMAL" or "WAITING_FOR_SPAWN"
-        this.boardBeforeMove = 0;
-        this.boardAfterMoveNoSpawn = 0;
         
         // Game stats matching Qt app
         this.score = 0;
@@ -75,49 +79,72 @@ class App {
 
     async initWorker() {
         const loaderText = document.getElementById('loader-text');
-        loaderText.textContent = "Loading Python Files...";
+        this.workerReady = false;
         
-        const filesToLoad = [
-            { virtualPath: 'src/__init__.py', url: '../__init__.py' },
-            { virtualPath: 'src/game_engine.py', url: '../game_engine.py' },
-            { virtualPath: 'src/solver.py', url: '../solver.py' },
-            { virtualPath: 'src/paths.py', url: '../paths.py' },
-            { virtualPath: 'src/web_solver.py', url: '../web_solver.py' },
-            { virtualPath: 'config.yaml', url: '../../config.yaml' }
-        ];
+        if (!this.cachedFileContents) {
+            loaderText.textContent = "Loading Python Files...";
+            const filesToLoad = [
+                'src/__init__.py',
+                'src/game_engine.py',
+                'src/solver.py',
+                'src/paths.py',
+                'src/web_solver.py',
+                'config.yaml'
+            ];
 
-        const fileContents = {};
-        for (const f of filesToLoad) {
-            try {
-                const response = await fetch(f.url);
-                fileContents[f.virtualPath] = await response.text();
-            } catch (e) {
-                console.error(`Failed to load ${f.virtualPath}`, e);
+            const fileContents = {};
+            const timestamp = new Date().getTime();
+            for (const f of filesToLoad) {
+                try {
+                    const response = await fetch(`../../${f}?t=${timestamp}`);
+                    fileContents[f] = await response.text();
+                } catch (e) {
+                    console.error(`Failed to load ${f}`, e);
+                }
             }
+            this.cachedFileContents = fileContents;
         }
 
-        loaderText.textContent = "Initializing Pyodide...";
         this.worker = new Worker('worker.js');
         
         return new Promise((resolve) => {
             this.worker.onmessage = (e) => {
-                const { type, result, error } = e.data;
+                const { type, result, elapsed_ms, error, solveId } = e.data;
+                
                 if (type === 'ready') {
                     console.log("Worker ready");
+                    this.workerReady = true;
+                    
+                    if (this.needsReSolve) {
+                        this.needsReSolve = false;
+                        this.solve();
+                    }
                     resolve();
+                } else if (type === 'solve_progress') {
+                    if (solveId === this.currentSolveId) {
+                        this.handleSolveResult(result, true, elapsed_ms);
+                    }
                 } else if (type === 'solve_result') {
-                    this.handleSolveResult(result);
+                    if (solveId === this.currentSolveId) {
+                        this.handleSolveResult(result, false, elapsed_ms);
+                    }
                 } else if (type === 'error') {
-                    console.error("Worker error:", error);
-                    this.statusBanner.textContent = `ERROR: ${error}`;
-                    this.statusBanner.style.backgroundColor = "#b71c1c";
-                    this.statusBanner.style.color = "#ffffff";
+                    if (solveId === this.currentSolveId || !solveId) {
+                        console.error("Worker error:", error);
+                        if (this.hardKillTimeout) clearTimeout(this.hardKillTimeout);
+                        this.isSolving = false; 
+                        this.solveBtn.disabled = false;
+                        this.solveBtn.textContent = "Solve";
+                        this.statusBanner.textContent = `ERROR: ${error}`;
+                        this.statusBanner.style.backgroundColor = "#b71c1c";
+                        this.statusBanner.style.color = "#ffffff";
+                    }
                 }
             };
 
             this.worker.postMessage({
                 type: 'init',
-                payload: { files: fileContents }
+                payload: { files: this.cachedFileContents }
             });
         });
     }
@@ -147,13 +174,12 @@ class App {
             if (e.key === 'ArrowDown') this.executeMove(3);
         };
 
-        // Rerender when settings change to update solver
-        this.modeSelect.onchange = () => this.solve();
-        this.depthSelect.onchange = () => this.solve();
-        this.timeSelect.onchange = () => this.solve();
-        this.chkX8.onchange = () => this.solve();
-        this.chkX16.onchange = () => this.solve();
-        this.chkEmpirical.onchange = () => this.solve();
+        const triggerSolve = () => { if (this.guiState === "NORMAL") this.triggerSolve(); };
+        this.modeSelect.onchange = triggerSolve;
+        this.depthSelect.onchange = triggerSolve;
+        this.timeSelect.onchange = triggerSolve;
+        this.chkX8.onchange = triggerSolve;
+        this.chkX16.onchange = triggerSolve;
     }
 
     hideLoader() {
@@ -182,7 +208,6 @@ class App {
 
                 cell.onmousedown = (e) => {
                     if (e.button === 0) { // Left click
-                        // Qt logic: if 0 -> spawn_low, if spawn_low -> spawn_high, else increment
                         const mode = this.modeSelect.value;
                         const spawns = { "x1": [1, 2], "x4": [3, 4], "x8": [4, 5], "x16": [5, 6] };
                         const [low, high] = spawns[mode] || [1, 2];
@@ -194,7 +219,7 @@ class App {
                         this.grid[r][c] = 0;
                     }
                     this.renderGrid();
-                    if (this.guiState === "NORMAL") this.solve();
+                    if (this.guiState === "NORMAL") this.triggerSolve();
                 };
                 cell.oncontextmenu = (e) => e.preventDefault();
                 
@@ -284,20 +309,18 @@ class App {
             this.energy += energyCost;
             this.moves += 1;
             
-            // Qt state transition
             this.guiState = "WAITING_FOR_SPAWN";
             
             this.renderGrid();
             this.updateStats();
             this.updateUIState();
+            this.solve(); 
         }
     }
 
     confirmSpawn() {
         if (this.guiState !== "WAITING_FOR_SPAWN") return;
         
-        // Normally we'd calculate spawn score here
-        // For simplicity in JS simulation, we just return to normal
         this.guiState = "NORMAL";
         this.updateUIState();
         this.renderGrid();
@@ -307,7 +330,6 @@ class App {
     updateUIState() {
         const isNormal = this.guiState === "NORMAL";
         
-        // Buttons
         this.moveLeftBtn.disabled = !isNormal;
         this.moveRightBtn.disabled = !isNormal;
         this.moveUpBtn.disabled = !isNormal;
@@ -319,36 +341,92 @@ class App {
             this.statusBanner.textContent = "STATUS: Active Game / Edit Mode";
             this.statusBanner.style.backgroundColor = "#2b2b36";
             this.statusBanner.style.color = "#b0bec5";
-            this.confirmSpawnBtn.style.backgroundColor = "";
         } else {
             this.statusBanner.textContent = "⚠️ WAITING FOR SPAWN: Click spawned tiles, then ENTER or Confirm Spawn";
             this.statusBanner.style.backgroundColor = "#0d47a1";
             this.statusBanner.style.color = "#ffffff";
-            this.confirmSpawnBtn.style.backgroundColor = "#0d47a1";
         }
     }
 
+    async restartWorker() {
+        console.log("WEB_APP: Silent worker restart initiated due to unresponsiveness...");
+        if (this.worker) this.worker.terminate();
+        this.isSolving = false;
+        
+        this.recDirEl.textContent = "⚙️ Restarting Engine...";
+        this.statusBanner.textContent = "INTERRUPTING: Refreshing Python Runtime...";
+        this.statusBanner.style.backgroundColor = "#4527a0"; 
+        
+        this.needsReSolve = true;
+        await this.initWorker();
+    }
+
+    triggerSolve(delay = 250) {
+        if (this.solveDebounceTimeout) clearTimeout(this.solveDebounceTimeout);
+        this.solveDebounceTimeout = setTimeout(() => {
+            this.solve();
+        }, delay);
+    }
+
     solve() {
-        if (this.isSolving || !this.worker) return;
+        if (!this.worker) return;
+
+        if (!this.workerReady) {
+            this.needsReSolve = true;
+            return;
+        }
+
+        this.currentSolveId++;
+        const mySolveId = this.currentSolveId;
+
         this.isSolving = true;
         this.solveBtn.disabled = true;
         this.solveBtn.textContent = "Analyzing...";
 
+        this.recDirEl.textContent = "⌛ Thinking...";
+        this.decisionBadge.textContent = "⌛ THINKING";
+        this.decisionBadge.style.backgroundColor = "#e65100";
+        this.reasonsBox.innerText = "Searching deeper...";
+
+        const enabledModes = ["x1", "x4"];
+        if (this.chkX8.checked) enabledModes.push("x8");
+        if (this.chkX16.checked) enabledModes.push("x16");
+        if (!enabledModes.includes(this.modeSelect.value)) enabledModes.push(this.modeSelect.value);
+
         this.worker.postMessage({
             type: 'solve',
+            solveId: mySolveId,
             payload: {
                 grid: this.grid,
                 mode: this.modeSelect.value,
                 depth: this.depthSelect.value,
-                time_limit_ms: parseInt(this.timeSelect.value)
+                time_limit_ms: parseInt(this.timeSelect.value),
+                enabled_modes: enabledModes
             }
         });
+
+        // Watchdog: If the worker doesn't respond to THIS SPECIFIC solve request 
+        // within the grace period, we hard kill it to guarantee responsiveness.
+        const maxTimeMs = parseInt(this.timeSelect.value);
+        const gracePeriod = maxTimeMs > 0 ? (maxTimeMs * 0.5) : 5000;
+
+        if (this.hardKillTimeout) clearTimeout(this.hardKillTimeout);
+        this.hardKillTimeout = setTimeout(() => {
+            if (this.isSolving && this.currentSolveId === mySolveId) {
+                console.log(`WEB_APP: Worker unresponsive for ${gracePeriod}ms. Hard killing.`);
+                this.restartWorker();
+            }
+        }, gracePeriod);
     }
 
-    handleSolveResult(result) {
-        this.isSolving = false;
-        this.solveBtn.disabled = false;
-        this.solveBtn.textContent = "Solve";
+    handleSolveResult(evaluation, isPartial = false, elapsedMs = 0) {
+        if (this.hardKillTimeout) clearTimeout(this.hardKillTimeout);
+
+        if (!isPartial) {
+            this.isSolving = false;
+            this.solveBtn.disabled = false;
+            this.solveBtn.textContent = "Solve";
+        }
 
         if (this.guiState === "WAITING_FOR_SPAWN") {
             this.recDirEl.textContent = "Waiting for spawn input... 🕒";
@@ -357,55 +435,117 @@ class App {
             return;
         }
 
+        const bestMove = evaluation.best_move_str;
         const DIR_ICONS = { "LEFT": "◀", "RIGHT": "▶", "UP": "▲", "DOWN": "▼" };
-        const icon = DIR_ICONS[result.best_move] || "";
-        this.recDirEl.textContent = result.best_move ? `✅ RECOMMEND: ${result.best_move} (${icon})` : "GAME OVER 💀";
+        const icon = DIR_ICONS[bestMove] || "";
         
-        this.evValEl.textContent = `${result.ev.toFixed(2)} pts`;
+        let prefix = isPartial ? `🔍 CURRENT BEST (d${evaluation.completed_depth}):` : "✅ RECOMMEND:";
+        this.recDirEl.textContent = bestMove ? `${prefix} ${bestMove} (${icon})` : "GAME OVER 💀";
         
-        const mode = this.modeSelect.value;
-        const energyCost = { "x1": 1, "x4": 4, "x8": 8, "x16": 16 }[mode] || 1;
-        const evPerEnergy = (result.ev / energyCost).toFixed(2);
-        this.evEnergyValEl.textContent = `${evPerEnergy} pts/energy`;
+        const selectedMode = this.modeSelect.value;
+        const modeResults = evaluation.results[selectedMode];
         
-        const survivalScore = (result.expected_empty / 16.0) * 100.0;
+        if (modeResults) {
+            this.evValEl.textContent = `${modeResults.ev.toFixed(2)} pts`;
+            this.evEnergyValEl.textContent = `${modeResults.ev_per_energy.toFixed(2)} pts/energy`;
+        }
+
+        const survivalScore = evaluation.survival_score;
         this.survivalFill.style.width = `${survivalScore}%`;
         
-        let decision = "CONTINUE";
-        let badgeColor = "#2e7d32"; // Darker green like Qt
+        let decision = evaluation.decision.replace("_", " ");
+        let badgeColor = "#2e7d32";
         
-        if (!result.best_move) {
-            decision = "GAME OVER";
+        if (isPartial) {
+            decision = "⌛ " + decision;
+            badgeColor = "#e65100";
+        } else if (decision === "GAME OVER") {
             badgeColor = "#552222";
-        } else if (parseFloat(evPerEnergy) < 2.0) {
-            decision = "STOP & CONVERT";
+        } else if (decision === "STOP AND CONVERT") {
             badgeColor = "#c62828";
-        } else if (parseFloat(evPerEnergy) < 6.0) {
-            decision = "RESTART GAME";
+        } else if (decision === "RESTART GAME") {
             badgeColor = "#ef6c00";
         }
         
         this.decisionBadge.textContent = decision;
         this.decisionBadge.style.backgroundColor = badgeColor;
 
-        // Build report matching GUI
-        let report = [];
-        report.push(`Search Stats: Depth ${result.completed_depth} | Nodes ${result.node_count.toLocaleString()} | Time ${Math.round(result.elapsed_ms)}ms`);
-        report.push("=".repeat(45));
-        report.push("Heuristic Rationale:");
-        result.explanation.forEach(text => report.push(` • ${text}`));
-        
-        this.reasonsBox.innerText = report.join('\n');
+        this.reasonsBox.innerText = this.buildRichReport(evaluation, isPartial, elapsedMs);
 
-        // Highlight recommended move
         this.resetActionButtonStyles();
-        if (result.best_move) {
+        if (bestMove) {
             const moveMap = { "LEFT": this.moveLeftBtn, "RIGHT": this.moveRightBtn, "UP": this.moveUpBtn, "DOWN": this.moveDownBtn };
-            if (moveMap[result.best_move]) {
-                moveMap[result.best_move].classList.add('highlighted');
+            if (moveMap[bestMove]) {
+                moveMap[bestMove].classList.add('highlighted');
             }
             this.applyRecBtn.classList.add('apply-rec-highlighted');
         }
+    }
+
+    buildRichReport(evaluation, isPartial, elapsedMs) {
+        let report = [];
+        const selectedMode = this.modeSelect.value;
+
+        report.push("Per-Mode Progress:");
+        for (const [mode, res] of Object.entries(evaluation.results)) {
+            if (res) {
+                const status = isPartial ? "searching..." : "finished";
+                report.push(`  ● ${mode.toUpperCase()}: best ${res.best_move_str} at d${res.completed_depth} (Nodes: ${res.node_count.toLocaleString()} | ${Math.round(elapsedMs)}ms) [${status}]`);
+            } else {
+                report.push(`  ● ${mode.toUpperCase()}: initializing...`);
+            }
+        }
+        report.push("");
+
+        report.push(`Global Fair Recommendation (at depth ${evaluation.completed_depth}):`);
+        for (const [mode, res] of Object.entries(evaluation.results)) {
+            if (res) {
+                report.push(`  ● ${mode.toUpperCase()}: EV/Energy = ${res.ev_per_energy.toFixed(2)} (best ${res.best_move_str})`);
+            } else {
+                report.push(`  ● ${mode.toUpperCase()}: N/A`);
+            }
+        }
+        if (evaluation.best_mode) {
+            report.push(`  🏆 Winner: ${evaluation.best_mode.toUpperCase()} mode`);
+        }
+        report.push("");
+
+        let statusLine = `Search Stats: Depth ${evaluation.completed_depth} | Nodes ${evaluation.node_count.toLocaleString()} | Time ${Math.round(elapsedMs)}ms`;
+        if (isPartial) statusLine += "  ⏳";
+        report.push(statusLine);
+        report.push("=".repeat(45));
+        report.push("");
+
+        report.push("Heuristic Rationale:");
+        if (evaluation.explanation) {
+            evaluation.explanation.forEach(text => report.push(` • ${text}`));
+        }
+        report.push("");
+
+        report.push("Move Comparison (ranked by heuristic search score):");
+        const modeResults = evaluation.results[selectedMode];
+        if (modeResults && modeResults.move_values) {
+            const sortedMoves = Object.entries(modeResults.move_values).sort((a, b) => b[1] - a[1]);
+            const DIR_MAP_FROM_INT = { 0: "LEFT", 1: "RIGHT", 2: "UP", 3: "DOWN" };
+            const DIR_ICONS = { "LEFT": "◀", "RIGHT": "▶", "UP": "▲", "DOWN": "▼" };
+            
+            for (const [mInt, hScore] of sortedMoves) {
+                const mStr = DIR_MAP_FROM_INT[mInt];
+                const isBest = mStr === modeResults.best_move_str;
+                const pref = isBest ? "★ " : "  ";
+                const realEv = modeResults.move_real_values_str[mStr] || 0;
+                const energyCost = { "x1": 1, "x4": 4, "x8": 8, "x16": 16 }[selectedMode] || 1;
+                const evEnergy = realEv / energyCost;
+                
+                report.push(`${pref}${mStr.padEnd(8)} (${DIR_ICONS[mStr]}): RealEV=${realEv.toFixed(2).padEnd(9)} EV/Energy=${evEnergy.toFixed(2)} [HeuristicScore=${Math.round(hScore)}]`);
+            }
+        }
+
+        report.push("");
+        report.push("[RealEV = accumulated real merge+spawn pts across search tree]");
+        report.push("[HeuristicScore = search ranking value; used for move ordering only]");
+
+        return report.join('\n');
     }
 
     executeRecommendedMove() {
@@ -424,7 +564,6 @@ class App {
         });
     }
 
-    // JS Move logic (must match game_engine.py logic for local UI updates)
     moveLogic(direction) {
         let moved = false;
         let score = 0;
