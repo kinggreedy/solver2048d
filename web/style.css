@@ -1,0 +1,391 @@
+:root {
+    --bg-color: #121214;
+    --panel-bg: #1e1e24;
+    --panel-border: #2d2d35;
+    --stats-bg: #16161c;
+    --accent-blue: #4facfe;
+    --accent-green: #4caf50;
+    --accent-yellow: #ffeb3b;
+    --text-primary: #e0e0e0;
+    --text-muted: #b0bec5;
+    --btn-bg: #2a2a35;
+    --btn-hover: #353545;
+    --btn-border: #3d3d4b;
+    --grid-bg: #25252d;
+    --cell-bg: #15151b;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: "Segoe UI", "Inter", "Roboto", "Helvetica Neue", sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 20px;
+}
+
+.container {
+    width: 100%;
+    max-width: 1300px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+header {
+    display: none; /* The Qt app doesn't have a big header like the previous web version */
+}
+
+main {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 15px;
+    align-items: start;
+}
+
+@media (max-width: 1000px) {
+    main {
+        grid-template-columns: 1fr;
+    }
+}
+
+.panel {
+    background-color: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 15px;
+}
+
+.panel-title {
+    font-size: 15px;
+    font-weight: bold;
+    color: var(--accent-blue);
+    text-align: center;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+}
+
+/* Stats Area */
+.stats-frame {
+    background-color: var(--stats-bg);
+    padding: 10px;
+    border-radius: 4px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.stat-item {
+    font-weight: bold;
+    font-size: 14px;
+}
+
+.stat-score { color: var(--accent-green); }
+.stat-energy { color: var(--accent-yellow); }
+.stat-efficiency { color: #00e676; }
+
+.status-banner {
+    background-color: #2b2b36;
+    color: var(--text-muted);
+    padding: 8px;
+    border-radius: 4px;
+    font-weight: bold;
+    font-size: 13px;
+    text-align: center;
+    margin-bottom: 10px;
+}
+
+/* Grid Area */
+.grid-frame {
+    background-color: var(--grid-bg);
+    border-radius: 10px;
+    border: 1px solid #33333f;
+    padding: 10px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    gap: 8px;
+    aspect-ratio: 1 / 1;
+    max-width: 500px;
+    margin: 0 auto 10px auto;
+}
+
+.cell {
+    background-color: var(--cell-bg);
+    border: 1px solid var(--btn-border);
+    border-radius: 4px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: #ffffff;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s;
+    position: relative;
+}
+
+.cell:hover {
+    background-color: #202028;
+}
+
+/* Action Area */
+.action-frame {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px;
+    background-color: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    align-items: center;
+}
+
+.action-label {
+    font-weight: bold;
+    color: var(--text-muted);
+    font-size: 13px;
+    margin-right: 5px;
+}
+
+button {
+    background-color: var(--btn-bg);
+    color: #ffffff;
+    border: 1px solid var(--btn-border);
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-weight: bold;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+button:hover {
+    background-color: var(--btn-hover);
+    border-color: #5d5d75;
+}
+
+button:active {
+    background-color: #1a1a24;
+}
+
+button:disabled {
+    background-color: #15151b;
+    color: #666677;
+    border-color: #202025;
+    cursor: not-allowed;
+}
+
+button.btn-primary {
+    background-color: #00796b;
+    border-color: #00897b;
+}
+
+button.btn-reset {
+    background-color: #552222;
+    border-color: #773333;
+}
+
+button.btn-new {
+    background-color: #1b5e20;
+    border-color: #2e7d32;
+}
+
+button.btn-confirm {
+    background-color: #0d47a1;
+    border-color: #1565c0;
+}
+
+.bottom-controls {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+}
+
+/* Right Panel (Solver) */
+.solver-title {
+    color: #00e676;
+}
+
+.settings-grid {
+    display: grid;
+    grid-template-columns: auto 1fr auto 1fr;
+    gap: 10px;
+    align-items: center;
+    font-size: 13px;
+    margin-bottom: 10px;
+}
+
+.settings-grid label {
+    white-space: nowrap;
+}
+
+select, input[type="number"] {
+    background-color: var(--btn-bg);
+    border: 1px solid var(--btn-border);
+    border-radius: 4px;
+    padding: 4px;
+    color: #ffffff;
+    outline: none;
+    font-size: 13px;
+}
+
+.rec-card {
+    background-color: var(--stats-bg);
+    border-radius: 4px;
+    padding: 15px;
+    text-align: center;
+    margin-bottom: 15px;
+}
+
+.rec-dir {
+    font-size: 24px;
+    font-weight: bold;
+    color: #ffffff;
+    margin-bottom: 8px;
+}
+
+.decision-badge {
+    background-color: #424242;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: bold;
+    padding: 4px 12px;
+    border-radius: 12px;
+    display: inline-block;
+    margin-bottom: 15px;
+}
+
+.rec-details {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 8px;
+    text-align: left;
+    font-size: 13px;
+}
+
+.rec-details .val {
+    font-weight: bold;
+}
+
+.progress-bar {
+    height: 18px;
+    background-color: #15151b;
+    border: 1px solid var(--btn-border);
+    border-radius: 4px;
+    position: relative;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background-color: var(--accent-green);
+    transition: width 0.3s;
+}
+
+.reasons-box {
+    background-color: #121216;
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    color: #a0a0b0;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 10px;
+    min-height: 100px;
+    margin-top: 10px;
+}
+
+/* Loader Styles */
+.loader-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--bg-color);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    transition: opacity 0.5s;
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(79, 172, 254, 0.2);
+    border-top: 3px solid var(--accent-blue);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 15px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(3600deg); }
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* Tile styling matching EXACT Qt COLORS */
+.cell.tile-0 { background-color: #2e2e38; color: #ffffff; }
+.cell.tile-1 { background-color: #4facfe; color: #ffffff; }
+.cell.tile-2 { background-color: #00f2fe; color: #121214; }
+.cell.tile-3 { background-color: #4caf50; color: #ffffff; }
+.cell.tile-4 { background-color: #00e676; color: #121214; }
+.cell.tile-5 { background-color: #ffeb3b; color: #121214; }
+.cell.tile-6 { background-color: #ff9800; color: #ffffff; }
+.cell.tile-7 { background-color: #ff5722; color: #ffffff; }
+.cell.tile-8 { background-color: #f44336; color: #ffffff; }
+.cell.tile-9 { background-color: #d500f9; color: #ffffff; }
+.cell.tile-10 { background-color: #651fff; color: #ffffff; }
+.cell.tile-11 { background-color: #37474f; color: #ffffff; border: 2px solid #ffffff; } /* Stone */
+.cell.tile-12 { background-color: #121214; color: #ffffff; }
+.cell.tile-13 { background-color: #121214; color: #ffffff; }
+.cell.tile-14 { background-color: #121214; color: #ffffff; }
+.cell.tile-15 { background-color: #121214; color: #ffffff; }
+
+/* Highlight recommended move button */
+button.highlighted {
+    background-color: #311b92 !important;
+    border: 2px solid #d500f9 !important;
+    color: #ffffff !important;
+}
+
+button.apply-rec-highlighted {
+    background-color: #00796b !important;
+    border: 2px solid #00e676 !important;
+    color: #ffffff !important;
+}
+
+/* Waiting for spawn cell style */
+.cell.waiting-spawn {
+    border: 2px dashed #0d47a1 !important;
+    background-color: #1b1b22 !important;
+}
+
+.cell.warning {
+    border: 3px solid #ffeb3b !important;
+}
+
+
+.stone-indicator {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    font-size: 10px;
+}
