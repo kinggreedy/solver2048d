@@ -78,21 +78,21 @@ class App {
         loaderText.textContent = "Loading Python Files...";
         
         const filesToLoad = [
-            'src/__init__.py',
-            'src/game_engine.py',
-            'src/solver.py',
-            'src/paths.py',
-            'src/web_solver.py',
-            'config.yaml'
+            { virtualPath: 'src/__init__.py', url: '../__init__.py' },
+            { virtualPath: 'src/game_engine.py', url: '../game_engine.py' },
+            { virtualPath: 'src/solver.py', url: '../solver.py' },
+            { virtualPath: 'src/paths.py', url: '../paths.py' },
+            { virtualPath: 'src/web_solver.py', url: '../web_solver.py' },
+            { virtualPath: 'config.yaml', url: '../../config.yaml' }
         ];
 
         const fileContents = {};
         for (const f of filesToLoad) {
             try {
-                const response = await fetch(`../${f}`);
-                fileContents[f] = await response.text();
+                const response = await fetch(f.url);
+                fileContents[f.virtualPath] = await response.text();
             } catch (e) {
-                console.error(`Failed to load ${f}`, e);
+                console.error(`Failed to load ${f.virtualPath}`, e);
             }
         }
 
